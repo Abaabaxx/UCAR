@@ -209,7 +209,7 @@ class UnifiedStateMachine(object):
         self.found_good_name = None   # 用于存储找到的货物名称
         
         # 新增：仿真任务相关变量
-        self.PC_IP = '192.168.68.206'  # 请确保这是您电脑的正确IP地址
+        self.PC_IP = '192.168.222.206'  # 请确保这是您电脑的正确IP地址
         self.simulation_found_item = None
         self.simulation_room_location = None
         

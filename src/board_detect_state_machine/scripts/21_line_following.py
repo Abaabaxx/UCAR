@@ -167,7 +167,7 @@ class RobotStateMachine(object):
         self.line_following_timeout = 300.0 # 巡线任务超时时间（5分钟）
 
         # 新增：仿真任务相关变量
-        self.PC_IP = '192.168.68.206'  # 请确保这是您电脑的正确IP地址
+        self.PC_IP = '192.168.222.206'  # 请确保这是您电脑的正确IP地址
         self.simulation_found_item = None
         self.simulation_room_location = None
         # 新增：记录最终通过的车道，'lane1' 或 'lane2'
@@ -1092,6 +1092,7 @@ class RobotStateMachine(object):
     def handle_event(self, event):
         if self.current_state == RobotState.IDLE and event == Event.START_CMD:
                 self.transition(RobotState.NAVIGATE_TO_UP_POINT)
+                # 这里配置初始阶段
                 # self.transition(RobotState.NAV_TO_TRAFFIC)
         elif self.current_state == RobotState.NAVIGATE_TO_UP_POINT:
             if event == Event.NAV_DONE_SUCCESS:
