@@ -1,0 +1,22 @@
+<launch>
+    <!--只循导航到目标板前，yolo识别，但模拟语音播报-->
+    
+    <!-- 导航模块 -->
+    <include file="$(find ucar_nav)/launch/base_ekf.launch" />
+
+    <!-- 自适应蒙特卡洛定位 (AMCL) -->
+    <include file="$(find ucar_nav)/config/amcl_test/amcl_board_origin.launch" /> 
+    
+    <!-- USB摄像头模块 -->
+    <include file="$(find lby_usb_cam)/launch/usb_cam_noimg_10hz.launch" />
+
+    <!-- YOLO 节点 -->
+    <include file="$(find darknet_ros)/launch/darknet_ros.launch" />
+
+    <!-- 语音播报节点 -->
+    <node pkg="xf_mic_asr_offline" type="voice_player.py" name="voice_player_node" output="screen" />   
+
+    <!-- 状态机节点 -->
+    <node pkg="board_detect_state_machine" type="19_nav_to_line.py" name="board_detect_state_machine_node" output="screen" /> 
+
+</launch>
