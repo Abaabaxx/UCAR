@@ -668,7 +668,7 @@ class UnifiedStateMachine(object):
         # --- 前半段事件处理 ---
         if self.current_state == RobotState.IDLE and event == Event.START_CMD:
             self.transition(RobotState.NAVIGATE_TO_QR1)
-            
+            #self.transition(RobotState.NAVIGATE_TO_QR_AREA)
         elif self.current_state == RobotState.NAVIGATE_TO_QR1:
             if event == Event.NAV_DONE_SUCCESS:
                 self.transition(RobotState.ROTATE_TO_QR2)
