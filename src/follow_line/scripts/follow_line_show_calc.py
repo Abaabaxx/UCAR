@@ -61,6 +61,10 @@ IPM_ROI_H = 240  # ROI高度
 IPM_ROI_X = 0    # ROI起始X坐标
 IPM_ROI_W = 640  # ROI宽度
 
+# 特殊区域检测参数
+NORMAL_AREA_HEIGHT_FROM_BOTTOM = 30  # 从ROI底部算起，被视为"常规"的区域高度（像素）
+CONSECUTIVE_FRAMES_FOR_DETECTION = 3  # 连续可疑帧数，达到此值则确认进入
+
 # 定义沿墙走的搜索模式（Follow The Wall）
 FTW_SEEDS = [
     (-1, 0),    # 左
@@ -133,6 +137,10 @@ class LineFollowerNode:
         self.integral = 0.0
         self.last_error = 0.0
         self.last_print_time = time.time()
+        
+        # 初始化特殊区域检测相关的状态变量
+        self.consecutive_special_frames = 0
+        self.in_special_area = False
         
         # 将最大角速度从度转换为弧度
         self.max_angular_speed_rad = np.deg2rad(MAX_ANGULAR_SPEED_DEG)
@@ -240,6 +248,28 @@ class LineFollowerNode:
             # 在右起始点画一个红色的圆
             cv2.circle(roi_display, right_start_point, 5, (0, 0, 255), -1)
             
+            # --- 特殊区域检测逻辑 ---
+            start_y = right_start_point[1]
+            
+            # 计算用于触发特殊区域检测的Y坐标阈值
+            # 当起始点的Y坐标小于这个值时，意味着它已经高于(进入了)底部常规区域
+            trigger_y_threshold = roi_h - NORMAL_AREA_HEIGHT_FROM_BOTTOM
+            
+            # 检查Y坐标是否在常规区域之外
+            if start_y < trigger_y_threshold:
+                self.consecutive_special_frames += 1
+            else:
+                # 如果在常规区域内，则重置计数器和状态
+                self.consecutive_special_frames = 0
+                if self.in_special_area:
+                    rospy.loginfo("--- 离开特殊区域（返回常规区域） ---")
+                    self.in_special_area = False
+
+            # 检查是否达到连续帧数要求，并且尚未标记为进入
+            if self.consecutive_special_frames >= CONSECUTIVE_FRAMES_FOR_DETECTION and not self.in_special_area:
+                self.in_special_area = True
+                rospy.loginfo("--- 检测到特殊区域 ---")
+            
             # 使用沿墙走算法寻找右边界
             right_points = follow_the_wall(binary_roi_frame, right_start_point)
             
@@ -320,6 +350,12 @@ class LineFollowerNode:
                         rospy.loginfo("Error: %7.2f | Linear_x: %.2f | Angular_z: %7.2f deg/s", 
                                     error, final_linear_x, final_angular_deg)
                         self.last_print_time = current_time
+        else:
+            # 如果没有找到起始点，重置所有状态
+            self.consecutive_special_frames = 0
+            if self.in_special_area:
+                rospy.loginfo("--- 离开特殊区域（未找到边线） ---")
+                self.in_special_area = False
         
         # 发布调试图像
         try:
