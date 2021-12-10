@@ -242,7 +242,8 @@ class UnifiedStateMachine(object):
         self.max_global_search_retries = 2 # 全局“大循环”重试次数 (共1+2=3次)
         
         # 新增：仿真任务相关变量
-        self.PC_IP = '192.168.2.247'  # 请确保这是您电脑的正确IP地址
+        self.PC_IP = '192.168.1.100'  # 请确保这是您电脑的正确IP地址
+        # self.PC_IP = '192.168.2.247'  # 请确保这是您电脑的正确IP地址
         # self.PC_IP = '192.168.222.206'  # 请确保这是您电脑的正确IP地址
 
         self.simulation_timeout_duration = 210.0 # 3分30秒
