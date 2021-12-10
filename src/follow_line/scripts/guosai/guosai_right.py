@@ -73,7 +73,7 @@ START_POINT_SEARCH_MIN_Y = 120 # 允许寻找起始点的最低Y坐标(从顶部
 LOOKAHEAD_DISTANCE = 10  # 胡萝卜点与基准点的距离（像素）
 PRINT_HZ = 4  # 打印error的频率（次/秒）
 # 路径规划参数
-CENTER_LINE_OFFSET = -52  # 从右边线向左偏移的像素数
+CENTER_LINE_OFFSET = -45  # 从右边线向左偏移的像素数
 # 速度控制参数
 LINEAR_SPEED = 0.1  # 前进速度 (m/s)
 ERROR_DEADZONE_PIXELS = 15  # 误差死区（像素），低于此值则认为方向正确
@@ -223,7 +223,7 @@ EXIT_TARGET_ANGLE_DEG = 0.0           # 扫描中心: 正前方 (0度)
 EXIT_SCAN_RANGE_DEG = 100.0           # 扫描范围: 中心±50度
 EXIT_MIN_DIST_M = 0.2                 # 最小检测距离
 EXIT_MAX_DIST_M = 1.5                 # 最大检测距离
-EXIT_MIN_LENGTH_M = 0.37               # 板子最小长度 (米)
+EXIT_MIN_LENGTH_M = 0.30               # 板子最小长度 (米)
 EXIT_MAX_LENGTH_M = 0.63               # 板子最大长度 (米)
 EXIT_ANGLE_TOL_DEG = 4.0              # 正对出口板时的角度容忍度 (度)
 

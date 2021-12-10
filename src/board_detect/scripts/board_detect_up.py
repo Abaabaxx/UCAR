@@ -46,7 +46,7 @@ class ClusterVisualizer:
         self.min_points_for_fitting = 4   # 进行线拟合所需的最小点数
         
         # 长度筛选阈值
-        self.min_length = 0.39  # 最小长度（米）
+        self.min_length = 0.34  # 最小长度（米）
         self.max_length = 0.6  # 最大长度（米）
         
         # 定义ROI多边形区域
