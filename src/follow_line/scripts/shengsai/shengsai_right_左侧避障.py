@@ -9,6 +9,7 @@ from cv_bridge import CvBridge, CvBridgeError
 from std_srvs.srv import SetBool, SetBoolResponse
 from geometry_msgs.msg import Twist, Point
 from std_msgs.msg import String
+
 from nav_msgs.msg import Odometry
 
 from threading import Lock
@@ -26,21 +27,21 @@ rosservice call /follow_line/run "data: false"
 '''
 # --- 参数配置区 ---
 # 有限状态机（FSM）状态定义
-FOLLOW_LEFT = 0          # 状态一：沿左墙巡线
-STRAIGHT_TRANSITION = 1     # 新增状态：直行过渡
-ROTATE_TO_FACE_EXIT_BOARD = 2 # 状态二：旋转正对出口板
-FOLLOW_LEFT_WITH_AVOIDANCE = 3 # 状态三：带避障巡线
-ALIGN_WITH_OBSTACLE_BOARD = 4 # 状态四：对准前方的障碍物板
-AVOIDANCE_MANEUVER = 5    # 状态五：执行避障机动
-FOLLOW_TO_FINISH = 6      # 状态六：最终冲刺巡线
-FINAL_STOP = 7           # 状态七：任务结束并停止
+FOLLOW_RIGHT = 0          # 状态一：沿右墙巡线
+STRAIGHT_TRANSITION = 1     # 状态二：直行过渡
+ROTATE_TO_FACE_EXIT_BOARD = 2 # 状态三：旋转正对出口板
+FOLLOW_RIGHT_WITH_AVOIDANCE = 3 # 状态四：带避障巡线
+ALIGN_WITH_OBSTACLE_BOARD = 4 # 状态五：在避障前对准障碍物板
+AVOIDANCE_MANEUVER = 5    # 状态六：执行避障机动
+FOLLOW_TO_FINISH = 6      # 状态七：最终冲刺巡线
+FINAL_STOP = 7           # 状态八：任务结束并停止
 
 # 状态名称映射（用于日志输出）
 STATE_NAMES = {
-    FOLLOW_LEFT: "FOLLOW_LEFT",
+    FOLLOW_RIGHT: "FOLLOW_RIGHT",
     STRAIGHT_TRANSITION: "STRAIGHT_TRANSITION",
     ROTATE_TO_FACE_EXIT_BOARD: "ROTATE_TO_FACE_EXIT_BOARD",
-    FOLLOW_LEFT_WITH_AVOIDANCE: "FOLLOW_LEFT_WITH_AVOIDANCE",
+    FOLLOW_RIGHT_WITH_AVOIDANCE: "FOLLOW_RIGHT_WITH_AVOIDANCE",
     ALIGN_WITH_OBSTACLE_BOARD: "ALIGN_WITH_OBSTACLE_BOARD",
     AVOIDANCE_MANEUVER: "AVOIDANCE_MANEUVER",
     FOLLOW_TO_FINISH: "FOLLOW_TO_FINISH",
@@ -59,13 +60,13 @@ CANNY_HIGH_THRESHOLD = 150
 PERFORM_HORIZONTAL_FLIP = True  # 是否执行水平翻转
 # 起始点寻找参数
 START_POINT_SCAN_STEP = 10  # 向上扫描的步长（像素）
-HORIZONTAL_SEARCH_OFFSET = 20 # 水平搜索起始点的偏移量(相对于中心, 负为左, 正为右)
+HORIZONTAL_SEARCH_OFFSET = -20 # 水平搜索起始点的偏移量(相对于中心, 负为左, 正为右)
 START_POINT_SEARCH_MIN_Y = 120 # 允许寻找起始点的最低Y坐标(从顶部0开始算)
 # 胡萝卜点参数
 LOOKAHEAD_DISTANCE = 10  # 胡萝卜点与基准点的距离（像素）
 PRINT_HZ = 4  # 打印error的频率（次/秒）
 # 路径规划参数
-CENTER_LINE_OFFSET = 45  # 从左边线向右偏移的像素数
+CENTER_LINE_OFFSET = -45  # 从右边线向左偏移的像素数
 # 速度控制参数
 LINEAR_SPEED = 0.1  # 前进速度 (m/s)
 ERROR_DEADZONE_PIXELS = 15  # 误差死区（像素），低于此值则认为方向正确
@@ -90,7 +91,7 @@ IPM_ROI_W = 640  # ROI宽度
 # 特殊区域检测参数
 NORMAL_AREA_HEIGHT_FROM_BOTTOM = 50  # 从ROI底部算起，被视为"常规"的区域高度（像素）
 CONSECUTIVE_FRAMES_FOR_DETECTION = 3  # 连续可疑帧数，达到此值则确认进入
-STRAIGHT_TRANSITION_EXIT_FROM_BOTTOM_PX = 38 # 从ROI底部算起，小于此像素距离则退出直行
+STRAIGHT_TRANSITION_EXIT_FROM_BOTTOM_PX = 35 # 从ROI底部算起，小于此像素距离则退出直行
 
 # 激光雷达避障参数
 LIDAR_TOPIC = "/scan"                                  # 激光雷达话题名称
@@ -100,11 +101,11 @@ AVOIDANCE_POINT_THRESHOLD = 10                         # 触发避障的点数�
 
 # 避障机动参数
 ODOM_TOPIC = "/odom"                                   # 里程计话题
-AVOIDANCE_STRAFE_OUT_DISTANCE_M = 0.5                  # 避障-向外平移距离 (米)
-AVOIDANCE_STRAFE_IN_DISTANCE_M = 0.45                   # 避障-向内平移距离 (米)
+AVOIDANCE_STRAFE_OUTWARD_M = 0.5                      # 避障-外侧平移距离 (米)
+AVOIDANCE_STRAFE_INWARD_M = 0.5                       # 避障-内侧平移距离 (米)
 AVOIDANCE_FORWARD_DISTANCE_M = 0.58                     # 避障-前进距离 (米)
-AVOIDANCE_STRAFE_SPEED_MPS = 0.15                       # 避障-平移速度 (米/秒)
-AVOIDANCE_FORWARD_SPEED_MPS = 0.15                      # 避障-前进速度 (米/秒)
+AVOIDANCE_STRAFE_SPEED_MPS = 0.2                       # 避障-平移速度 (米/秒)
+AVOIDANCE_FORWARD_SPEED_MPS = 0.2                      # 避障-前进速度 (米/秒)
 
 # 停车区域检测参数 (用于FOLLOW_TO_FINISH状态)
 STOP_ZONE_ROI_HEIGHT_PX = 3        # 从图像底部向上计算的窗口高度
@@ -140,20 +141,22 @@ FTW_SEEDS_RIGHT = [
 
 
 
+
+
 # ==============================================================================
-# 状态六: ROTATE_TO_FACE_EXIT_BOARD (旋转正对出口板)
+# 状态三: ROTATE_TO_FACE_EXIT_BOARD (旋转正对出口板)
 # ==============================================================================
 # --- 检测参数 ---
 EXIT_TARGET_ANGLE_DEG = 0.0           # 扫描中心: 正前方 (0度)
 EXIT_SCAN_RANGE_DEG = 100.0           # 扫描范围: 中心±50度
 EXIT_MIN_DIST_M = 0.2                 # 最小检测距离
 EXIT_MAX_DIST_M = 2                 # 最大检测距离
-EXIT_MIN_LENGTH_M = 0.30               # 板子最小长度 (米)
+EXIT_MIN_LENGTH_M = 0.30              # 板子最小长度 (米)
 EXIT_MAX_LENGTH_M = 0.63               # 板子最大长度 (米)
-EXIT_ANGLE_TOL_DEG = 2.0              # 正对出口板时的角度容忍度 (度)
+EXIT_ANGLE_TOL_DEG = 4.0              # 正对出口板时的角度容忍度 (度)
 
 # ==============================================================================
-# 状态六-A: ALIGN_WITH_OBSTACLE_BOARD (对准前方的障碍物板)
+# 状态四: ALIGN_WITH_OBSTACLE_BOARD (对准前方的障碍物板)
 # ==============================================================================
 ALIGN_OBSTACLE_TARGET_ANGLE_DEG = 0.0      # 扫描中心: 正前方 (0度)
 ALIGN_OBSTACLE_SCAN_RANGE_DEG = 120.0      # 扫描范围: 中心±60度
@@ -179,7 +182,18 @@ BOARD_DETECT_MIN_CLUSTER_PTS = 5        # 一个有效聚类最少的点数
 LIDAR_X_OFFSET_M = -0.1
 
 
-
+# 定义沿墙走的搜索模式（Follow The Wall）
+# 顺时针搜索，用于沿着右侧赛道内边界行走
+FTW_SEEDS_RIGHT = [
+    (-1, 0),    # 左
+    (-1, -1),   # 左上
+    (0, -1),    # 上
+    (1, -1),    # 右上
+    (1, 0),     # 右
+    (1, 1),     # 右下
+    (0, 1),     # 下
+    (-1, 1)     # 左下
+]
 
 def follow_the_wall(image, start_point, seeds):
     """
@@ -240,12 +254,14 @@ def extract_final_border(image_height, raw_points):
 
 
 class LineFollowerNode:
+
+    
     def __init__(self):
         # 初始化运行状态
         self.is_running = True
         
         # 初始化FSM状态
-        self.current_state = FOLLOW_LEFT
+        self.current_state = FOLLOW_RIGHT
         
         # 初始化PID内部状态跟踪变量
         self.was_in_deadzone = None # 用于跟踪上一帧是否在PID死区内
@@ -258,6 +274,7 @@ class LineFollowerNode:
         self.latest_debug_image = np.zeros((IPM_ROI_H, IPM_ROI_W, 3), dtype=np.uint8)
         # 新增：状态发布者
         self.status_pub = rospy.Publisher('/line_following_status', String, queue_size=1, latch=True)
+        # 初始化新的内部阶段标志
         self.is_exit_board_faced = False    # 状态六：是否已正对出口板
         
         # 初始化状态机控制标志
@@ -265,8 +282,8 @@ class LineFollowerNode:
         
         # 初始化避障标志位
         self.obstacle_detected = False # 避障标志位
-        self.is_obstacle_board_locked = False # 障碍物板锁定标志
-        self.obstacle_board_angle_error_deg = 0.0 # 障碍物板角度误差
+        self.is_obstacle_board_locked = False # 状态六-A：是否已锁定障碍物板
+        self.obstacle_board_angle_error_deg = 0.0 # 状态六-A：障碍物板的角度偏差
         
         # 初始化里程计和避障机动相关的状态变量
         self.latest_odom_pose = None         # 存储当前里程计姿态
@@ -309,12 +326,14 @@ class LineFollowerNode:
         # 创建速度指令发布者
         self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         
+
+        
         
         # 创建一个30Hz的主控制循环
         self.main_loop_timer = rospy.Timer(rospy.Duration(1.0/30.0), self.main_control_loop)
         
         rospy.loginfo("已创建图像订阅者和调试图像发布者，等待图像数据...")
-        rospy.loginfo("当前状态: FOLLOW_LEFT")
+        rospy.loginfo("当前状态: FOLLOW_RIGHT")
 
     def _process_image_for_centerline(self, binary_roi_frame, roi_display):
         """
@@ -341,14 +360,14 @@ class LineFollowerNode:
             start_search_x_left = (roi_w // 2) + HORIZONTAL_SEARCH_OFFSET
             for x in range(start_search_x_left, 0, -1):
                 if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x - 1] == 255:
-                    left_start_point = (x, y)
+                    left_start_point = (x - 1, y)
                     break
             
             # 寻找右起点 (使用FTW_right.py的逻辑)
             start_search_x_right = (roi_w // 2) - HORIZONTAL_SEARCH_OFFSET  # 相反偏移
             for x in range(start_search_x_right, roi_w - 1):
                 if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x + 1] == 255:
-                    right_start_point = (x, y)
+                    right_start_point = (x + 1, y)
                     break
             
             # 只有同时找到左右起点才认为有效
@@ -429,7 +448,6 @@ class LineFollowerNode:
         stop_msg = Twist()
         self.cmd_vel_pub.publish(stop_msg)
 
-
     def _find_obstacle_board_with_signed_angle(self, scan_msg, target_angle_deg, scan_range_deg, alignment_mode, 
                                       min_dist_m=0.25, max_dist_m=1.5, min_length_m=0.45, max_length_m=0.62, 
                                       angle_tol_deg=9.0):
@@ -440,6 +458,8 @@ class LineFollowerNode:
         参数和返回值与 _find_board 相同，但角度偏差带有符号。
         """
         try:
+
+            
             # 1. 数据筛选：只考虑指定角度和距离范围内的点
             center_angle_rad = np.deg2rad(target_angle_deg)
             scan_half_range_rad = np.deg2rad(scan_range_deg / 2.0)
@@ -486,6 +506,8 @@ class LineFollowerNode:
             # 不要忘记最后一个聚类
             if len(current_cluster) >= BOARD_DETECT_MIN_CLUSTER_PTS:
                 clusters.append(current_cluster)
+            
+
             
             # 3. 聚类验证和角度检测
             for cluster in clusters:
@@ -540,10 +562,12 @@ class LineFollowerNode:
                         center_x_m = np.mean(cluster_array[:, 0])  # 前向距离（X轴）
                         lateral_error_m = np.mean(cluster_array[:, 1])  # 横向偏差（Y轴）
                         
-                                                # 为日志记录计算base_link坐标
+
+                        
+                        # 为日志记录计算base_link坐标
                         center_x_base_link = center_x_m + LIDAR_X_OFFSET_M
                         rospy.loginfo_throttle(2, "检测到垂直板子: 中心点(机器人坐标系 x=%.2f, y=%.2f)m, 长度=%.2fm, 角度偏差=%.1f度", 
-                                             center_x_base_link, lateral_error_m, length, deviation)
+                                            center_x_base_link, lateral_error_m, length, deviation)
                         return (True, center_x_m, lateral_error_m, deviation)
                         
                 elif alignment_mode == 'PARALLEL':
@@ -552,6 +576,8 @@ class LineFollowerNode:
                         # 找到了一个平行的板子
                         center_x_m = np.mean(cluster_array[:, 0])  # 前向距离（X轴）
                         lateral_error_m = np.mean(cluster_array[:, 1])  # 横向偏差（Y轴）
+                        
+
                         
                         # 为日志记录计算base_link坐标
                         center_x_base_link = center_x_m + LIDAR_X_OFFSET_M
@@ -586,6 +612,8 @@ class LineFollowerNode:
         tuple: (是否找到符合条件的板子, 中心点X坐标, 中心点Y坐标, 角度偏差)
         """
         try:
+
+            
             # 1. 数据筛选：只考虑指定角度和距离范围内的点
             center_angle_rad = np.deg2rad(target_angle_deg)
             scan_half_range_rad = np.deg2rad(scan_range_deg / 2.0)
@@ -681,7 +709,9 @@ class LineFollowerNode:
                         center_x_m = np.mean(cluster_array[:, 0])  # 前向距离（X轴）
                         lateral_error_m = np.mean(cluster_array[:, 1])  # 横向偏差（Y轴）
                         
-                                                # 为日志记录计算base_link坐标
+                        
+                        
+                        # 为日志记录计算base_link坐标
                         center_x_base_link = center_x_m + LIDAR_X_OFFSET_M
                         rospy.loginfo_throttle(2, "检测到垂直板子: 中心点(机器人坐标系 x=%.2f, y=%.2f)m, 长度=%.2fm, 角度偏差=%.1f度", 
                                              center_x_base_link, lateral_error_m, length, deviation)
@@ -693,6 +723,8 @@ class LineFollowerNode:
                         # 找到了一个平行的板子
                         center_x_m = np.mean(cluster_array[:, 0])  # 前向距离（X轴）
                         lateral_error_m = np.mean(cluster_array[:, 1])  # 横向偏差（Y轴）
+                        
+                        
                         
                         # 为日志记录计算base_link坐标
                         center_x_base_link = center_x_m + LIDAR_X_OFFSET_M
@@ -761,7 +793,7 @@ class LineFollowerNode:
                     # 如果没找到，重置误差
                     self.obstacle_board_angle_error_deg = 0.0
                 
-        elif current_state == FOLLOW_LEFT_WITH_AVOIDANCE:
+        elif current_state == FOLLOW_RIGHT_WITH_AVOIDANCE:
             # 检测前方障碍物
             try:
                 # 计算0度（正前方）的索引
@@ -836,36 +868,34 @@ class LineFollowerNode:
             # 对于line_y_position，我们可以使用一个虚拟值，因为FOLLOW_TO_FINISH状态不需要它来判断状态转换
             line_y_position = roi_h // 2  # 使用中间位置作为占位符
         else:
-            # 使用单边线逻辑 - 左侧巡线 (寻找内边界: 黑->白)
+            # 使用原有的单边线逻辑
             start_search_x = (roi_w // 2) + HORIZONTAL_SEARCH_OFFSET
-            left_start_point = None
+            right_start_point = None
             current_scan_y = None
             
-            # 从底部开始，每隔START_POINT_SCAN_STEP个像素向上扫描，寻找左边线起始点
+            # 从底部开始，每隔START_POINT_SCAN_STEP个像素向上扫描，寻找右边线起始点
             # 限制最高搜索位置到START_POINT_SEARCH_MIN_Y
             for y in range(roi_h - 1, START_POINT_SEARCH_MIN_Y, -START_POINT_SCAN_STEP):
-                # 从中心向左扫描寻找左边线的内侧起始点
-                for x in range(start_search_x, 0, -1):
-                    # 【核心修改点】将条件从 (白,黑) 改为 (黑,白)
-                    if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x - 1] == 255:
-                        # 【关键修正点】起始点应该是那个黑色的像素点
-                        left_start_point = (x, y) 
+                # 从中心向右扫描寻找右边线的内侧起始点
+                for x in range(start_search_x, roi_w - 1):
+                    if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x + 1] == 255:
+                        right_start_point = (x + 1, y)
                         current_scan_y = y
                         break
                 
-                if left_start_point is not None:
+                if right_start_point is not None:
                     break
 
-            if left_start_point:
+            if right_start_point:
                 is_line_found = True
-                line_y_position = left_start_point[1]
+                line_y_position = right_start_point[1]
                 
                 # 计算误差的逻辑
-                points = follow_the_wall(binary_roi_frame, left_start_point, FTW_SEEDS_LEFT)
+                points = follow_the_wall(binary_roi_frame, right_start_point, FTW_SEEDS_RIGHT)
                 if points:
                     final_border = extract_final_border(roi_h, points)
                     if final_border is not None:
-                        base_y = left_start_point[1]
+                        base_y = right_start_point[1]
                         anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
                         roi_points = []
                         for y_idx, x_val in enumerate(final_border):
@@ -880,7 +910,7 @@ class LineFollowerNode:
                             avg_x = sum(p[0] for p in roi_points) / len(roi_points)
                             error = avg_x - (roi_w // 2)
                         
-                        # 绘制左侧边线
+                        # 绘制右侧边线
                         for point in points:
                             cv2.circle(roi_display, point, 1, (0, 255, 255), -1)
                         
@@ -896,7 +926,7 @@ class LineFollowerNode:
                 cv2.line(roi_display, (0, current_scan_y), (roi_w, current_scan_y), (255, 0, 0), 1)
             
             if is_line_found:
-                cv2.circle(roi_display, left_start_point, 5, (0, 0, 255), -1)
+                cv2.circle(roi_display, right_start_point, 5, (0, 0, 255), -1)
 
         # --- 3. 停车区域检测 ---
         # 计算检测窗口坐标（底部中心）
@@ -949,6 +979,8 @@ class LineFollowerNode:
             line_y = self.line_y_position
             debug_image = self.latest_debug_image.copy()
             is_exit_board_faced = self.is_exit_board_faced
+            is_obstacle_board_locked = self.is_obstacle_board_locked
+            obstacle_board_angle_error_deg = self.obstacle_board_angle_error_deg
             is_stop_zone_detected = self.is_stop_zone_detected
         
         obstacle_detected = self.obstacle_detected
@@ -977,12 +1009,12 @@ class LineFollowerNode:
 
             # 根据当前步骤执行相应动作
             if self.maneuver_step == 0: # 步骤0: 向右平移
-                rospy.loginfo_throttle(1.0, "避障步骤0: 向右平移... (%.2f / %.2f m)", distance_moved, AVOIDANCE_STRAFE_OUT_DISTANCE_M)
-                if distance_moved < AVOIDANCE_STRAFE_OUT_DISTANCE_M:
-                    twist_msg.linear.y = -AVOIDANCE_STRAFE_SPEED_MPS
+                rospy.loginfo_throttle(1.0, "避障步骤0: 向左平移... (%.2f / %.2f m)", distance_moved, AVOIDANCE_STRAFE_OUTWARD_M)
+                if distance_moved < AVOIDANCE_STRAFE_OUTWARD_M:
+                    twist_msg.linear.y = AVOIDANCE_STRAFE_SPEED_MPS
                 else:
                     self.stop()
-                    rospy.loginfo("向右平移完成。")
+                    rospy.loginfo("向左平移完成。")
                     self.maneuver_step = 1
                     self.maneuver_initial_pose = None # 重置，为下一步做准备
             
@@ -997,12 +1029,12 @@ class LineFollowerNode:
                     self.maneuver_initial_pose = None # 重置
             
             elif self.maneuver_step == 2: # 步骤2: 向左平移
-                rospy.loginfo_throttle(1.0, "避障步骤2: 向左平移... (%.2f / %.2f m)", distance_moved, AVOIDANCE_STRAFE_IN_DISTANCE_M)
-                if distance_moved < AVOIDANCE_STRAFE_IN_DISTANCE_M:
-                    twist_msg.linear.y = AVOIDANCE_STRAFE_SPEED_MPS # 正号表示向左
+                rospy.loginfo_throttle(1.0, "避障步骤2: 向右平移... (%.2f / %.2f m)", distance_moved, AVOIDANCE_STRAFE_INWARD_M)
+                if distance_moved < AVOIDANCE_STRAFE_INWARD_M:
+                    twist_msg.linear.y = -AVOIDANCE_STRAFE_SPEED_MPS # 正号表示向左
                 else:
                     self.stop()
-                    rospy.loginfo("向左平移完成。避障机动结束。")
+                    rospy.loginfo("向右平移完成。避障机动结束。")
                     # 机动完成，进入最终冲刺巡线状态，并启动计时器
                     self.current_state = FOLLOW_TO_FINISH
                     self.follow_to_finish_start_time = time.time()
@@ -1013,17 +1045,8 @@ class LineFollowerNode:
             maneuver_display = np.zeros((IPM_ROI_H, IPM_ROI_W, 3), dtype=np.uint8)
             cv2.putText(maneuver_display, "AVOIDANCE MANEUVER - STEP: {}".format(self.maneuver_step), 
                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            
-            # 根据步骤动态选择目标距离
-            target_distance = 0.0
-            if self.maneuver_step == 0:
-                target_distance = AVOIDANCE_STRAFE_OUT_DISTANCE_M
-            elif self.maneuver_step == 1:
-                target_distance = AVOIDANCE_FORWARD_DISTANCE_M
-            elif self.maneuver_step == 2:
-                target_distance = AVOIDANCE_STRAFE_IN_DISTANCE_M
-
-            cv2.putText(maneuver_display, "Distance: {:.2f}/{:.2f}m".format(distance_moved, target_distance), 
+            cv2.putText(maneuver_display, "Distance: {:.2f}/{:.2f}m".format(distance_moved,
+                       AVOIDANCE_STRAFE_OUTWARD_M if self.maneuver_step == 0 else (AVOIDANCE_STRAFE_INWARD_M if self.maneuver_step == 2 else AVOIDANCE_FORWARD_DISTANCE_M)), 
                        (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             debug_image = maneuver_display
             
@@ -1036,7 +1059,7 @@ class LineFollowerNode:
             return
         
         # 状态转换逻辑
-        if self.current_state == FOLLOW_LEFT:
+        if self.current_state == FOLLOW_RIGHT:
             # 如果边线出现在图像上部（远离机器人），则认为是特殊区域
             if is_line_found and line_y < (IPM_ROI_H - NORMAL_AREA_HEIGHT_FROM_BOTTOM):
                 self.consecutive_special_frames += 1
@@ -1046,7 +1069,7 @@ class LineFollowerNode:
             
             # 如果连续N帧都满足条件，则执行状态转换
             if self.consecutive_special_frames >= CONSECUTIVE_FRAMES_FOR_DETECTION:
-                rospy.loginfo("状态转换: FOLLOW_LEFT -> STRAIGHT_TRANSITION")
+                rospy.loginfo("状态转换: FOLLOW_RIGHT -> STRAIGHT_TRANSITION")
                 self.stop() # 立即停车
                 self.current_state = STRAIGHT_TRANSITION
                 # 关键：立即发布停车指令并结束本次循环，避免执行旧状态的逻辑
@@ -1063,14 +1086,14 @@ class LineFollowerNode:
                 return
         
         # 状态执行逻辑
-        if self.current_state == FOLLOW_LEFT:
+        if self.current_state == FOLLOW_RIGHT:
             # PID巡线逻辑
             if is_line_found:
                 self._execute_line_following_logic_in_main_loop(vision_error, twist_msg)
             else:
                 # 丢线则停止
                 self.stop()
-        
+
         elif self.current_state == STRAIGHT_TRANSITION:
             # 直行过渡
             rospy.loginfo_throttle(1, "状态: %s | 直行过渡中...", STATE_NAMES[self.current_state])
@@ -1088,23 +1111,23 @@ class LineFollowerNode:
             
             if is_exit_board_faced:
                 # 如果已正对出口板，则进入带避障巡线状态
-                rospy.loginfo("状态转换: ROTATE_TO_FACE_EXIT_BOARD -> FOLLOW_LEFT_WITH_AVOIDANCE")
+                rospy.loginfo("状态转换: ROTATE_TO_FACE_EXIT_BOARD -> FOLLOW_RIGHT_WITH_AVOIDANCE")
                 self.stop()  # 立即停车
                 
                 # 设置状态标志
-                self.current_state = FOLLOW_LEFT_WITH_AVOIDANCE
+                self.current_state = FOLLOW_RIGHT_WITH_AVOIDANCE
                 
                 # 立即发布停止指令并结束本次循环
                 self.cmd_vel_pub.publish(Twist())
                 return
             else:
-                # 如果未找到正对的出口板，则向左旋转
-                rospy.loginfo_throttle(1, "状态: %s | 向左旋转寻找出口板...", STATE_NAMES[self.current_state])
-                twist_msg.angular.z = self.alignment_rotation_speed_rad  # 正号表示向左旋转
+                # 如果未找到正对的出口板，则向右旋转
+                rospy.loginfo_throttle(1, "状态: %s | 向右旋转寻找出口板...", STATE_NAMES[self.current_state])
+                twist_msg.angular.z = -self.alignment_rotation_speed_rad  # 负号表示向右旋转
                 
-        elif self.current_state == FOLLOW_LEFT_WITH_AVOIDANCE:
+        elif self.current_state == FOLLOW_RIGHT_WITH_AVOIDANCE:
             if obstacle_detected:
-                rospy.loginfo("状态转换: FOLLOW_LEFT_WITH_AVOIDANCE -> ALIGN_WITH_OBSTACLE_BOARD")
+                rospy.loginfo("状态转换: FOLLOW_RIGHT_WITH_AVOIDANCE -> ALIGN_WITH_OBSTACLE_BOARD")
                 self.stop()
                 self.current_state = ALIGN_WITH_OBSTACLE_BOARD
                 # 重置对准状态变量
@@ -1119,7 +1142,6 @@ class LineFollowerNode:
             else:
                 # 丢线则停止
                 self.stop()
-        
         elif self.current_state == ALIGN_WITH_OBSTACLE_BOARD:
             # 从实例变量中安全地读取障碍物板的检测结果
             with self.data_lock:
@@ -1131,9 +1153,9 @@ class LineFollowerNode:
             twist_msg.linear.y = 0.0
             
             if not is_obstacle_board_locked:
-                # 阶段A: 未锁定目标，执行默认搜索旋转 (向左)
-                rospy.loginfo_throttle(1, "状态: %s | 未锁定目标板，向左搜索...", STATE_NAMES[self.current_state])
-                twist_msg.angular.z = self.alignment_rotation_speed_rad
+                # 阶段A: 未锁定目标，执行默认搜索旋转 (向右)
+                rospy.loginfo_throttle(1, "状态: %s | 未锁定目标板，向右搜索...", STATE_NAMES[self.current_state])
+                twist_msg.angular.z = -self.alignment_rotation_speed_rad
             else:
                 # 阶段B: 已锁定目标，开始对准
                 if abs(obstacle_board_angle_error_deg) <= ALIGN_OBSTACLE_ALIGN_ANGLE_TOL_DEG:
@@ -1205,10 +1227,10 @@ class LineFollowerNode:
         # 全局丢线处理：如果丢线，则对于所有需要巡线的状态，都执行原地旋转搜索
         if not is_line_found:
             # 只有在需要巡线的状态下才旋转搜索
-            if self.current_state in [FOLLOW_LEFT, STRAIGHT_TRANSITION, FOLLOW_LEFT_WITH_AVOIDANCE, FOLLOW_TO_FINISH]:
+            if self.current_state in [FOLLOW_RIGHT, FOLLOW_RIGHT_WITH_AVOIDANCE, FOLLOW_TO_FINISH]:
                 rospy.loginfo_throttle(1, "状态: %s | 丢线，开始原地旋转搜索...", STATE_NAMES[self.current_state])
                 twist_msg.linear.x = 0.0
-                twist_msg.angular.z = self.alignment_rotation_speed_rad  # 正号表示向左旋转
+                twist_msg.angular.z = -self.alignment_rotation_speed_rad  # 负号表示向右旋转
         
         # 发布最终确定的指令
         self.cmd_vel_pub.publish(twist_msg)
