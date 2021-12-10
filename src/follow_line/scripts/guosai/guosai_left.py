@@ -202,7 +202,7 @@ DRIVE_TO_CENTER_OBSERVATION_ANGLE_TOL_DEG = 35.0  # 直行到中心时的观察�
 # --- 行为参数 ---
 CIRCLE_LINEAR_SPEED_M_S = 0.2  # 前进线速度 (m/s)
 CIRCLE_RADIUS_M = 0.45          # 期望的圆环半径 (m)
-CIRCLE_BLIND_DRIVE_RATIO = 0.65 # 盲走阶段占整个圆周运动的比例 (估算值)
+CIRCLE_BLIND_DRIVE_RATIO = 0.71 # 盲走阶段占整个圆周运动的比例 (估算值)
 
 # --- 检测参数 (左侧出口板) ---
 CIRCLE_EXIT_TARGET_ANGLE_DEG = 90.0  # 扫描中心: 左侧 (90度)
