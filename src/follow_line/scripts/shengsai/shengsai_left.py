@@ -65,7 +65,7 @@ START_POINT_SEARCH_MIN_Y = 120 # 允许寻找起始点的最低Y坐标(从顶部
 LOOKAHEAD_DISTANCE = 10  # 胡萝卜点与基准点的距离（像素）
 PRINT_HZ = 4  # 打印error的频率（次/秒）
 # 路径规划参数
-CENTER_LINE_OFFSET = 45  # 从左边线向右偏移的像素数
+CENTER_LINE_OFFSET = 48  # 从左边线向右偏移的像素数
 # 速度控制参数
 LINEAR_SPEED = 0.1  # 前进速度 (m/s)
 ERROR_DEADZONE_PIXELS = 15  # 误差死区（像素），低于此值则认为方向正确
@@ -100,9 +100,9 @@ AVOIDANCE_POINT_THRESHOLD = 10                         # 触发避障的点数�
 
 # 避障机动参数
 ODOM_TOPIC = "/odom"                                   # 里程计话题
-AVOIDANCE_STRAFE_OUT_DISTANCE_M = 0.5                  # 避障-向外平移距离 (米)
-AVOIDANCE_STRAFE_IN_DISTANCE_M = 0.5                   # 避障-向内平移距离 (米)
-AVOIDANCE_FORWARD_DISTANCE_M = 0.58                     # 避障-前进距离 (米)
+AVOIDANCE_STRAFE_OUT_DISTANCE_M = 0.45                  # 避障-向外平移距离 (米)
+AVOIDANCE_STRAFE_IN_DISTANCE_M = 0.45                   # 避障-向内平移距离 (米)
+AVOIDANCE_FORWARD_DISTANCE_M = 0.63                     # 避障-前进距离 (米)
 AVOIDANCE_STRAFE_SPEED_MPS = 0.2                       # 避障-平移速度 (米/秒)
 AVOIDANCE_FORWARD_SPEED_MPS = 0.2                      # 避障-前进速度 (米/秒)
 
