@@ -1,0 +1,8 @@
+prefix=/home/ucar/lby_ws/install
+
+Name: board_detect
+Description: Description of board_detect
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

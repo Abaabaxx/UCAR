@@ -1,0 +1,17 @@
+<launch>
+    <!-- 导航模块 -->
+    <include file="$(find ucar_nav)/launch/ucar_nav.launch" />
+
+    <!-- 语音识别模块 -->
+    <include file="$(find xf_mic_asr_offline)/launch/xf_mic_asr_offline.launch" />
+
+    <!-- USB摄像头模块 -->
+    <include file="$(find lby_usb_cam)/launch/usb_cam_noimg_10hz.launch" />
+    
+    <!-- 二维码识别模块 -->
+    <include file="$(find qr_code)/launch/qr_code.launch" />
+
+    <!-- 状态机节点 -->
+    <node pkg="state_machine" type="4_qr_read.py" name="state_machine_node" output="screen">
+    </node>
+</launch>

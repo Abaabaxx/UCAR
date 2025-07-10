@@ -1,0 +1,126 @@
+TebLocalPlannerROS:
+  odom_topic: odom
+
+  # Trajectory
+
+  teb_autosize: True
+  dt_ref: 0.3 # default 0.3 | 轨迹分辨率（单位秒）。小值导致精细分辨率，从而更好地逼近动力学模型，太高的值（> 0.6s）可能导致不再可行的轨迹
+  dt_hysteresis: 0.05
+  max_samples: 500
+  global_plan_overwrite_orientation: True # default True
+  allow_init_with_backwards_motion: False
+  max_global_plan_lookahead_dist: 1.0 # 最大前瞻路径规划距离 | 减小该值可以使局部规划路径更接近全局路径，但会削弱避障能力
+  global_plan_viapoint_sep: 0.5 # 全局规划吸引子之间的距离,含义是在global_planner轨迹上间隔多远会有一个viapoint插入。设置为1就是1m一个viapoint
+  global_plan_prune_distance: 1
+  exact_arc_length: False
+  feasibility_check_no_poses: 1 # default 5 | 判断生成的轨迹是否冲突,从轨迹起点开始逐个检查轨迹上的n个点，若n个点均不发生碰撞，则认为本次轨迹有效
+  publish_feedback: False # 发布反馈消息
+
+  # Robot
+
+  # max_vel_x: 1.0 #1.1
+  # max_vel_x_backwards: 0.15 # 最大倒车速度
+  # max_vel_y: 0.0
+  # max_vel_theta: 2.4
+  # acc_lim_x: 1.0 # 0 means not lim
+  # acc_lim_y: 0.0
+  # acc_lim_theta: 2.0
+  # min_turning_radius: 0.1 # 0 for diff-drive robot (can turn on place!)
+  max_vel_x: 1.1 #1.1
+  max_vel_x_backwards: 0.4 # 最大倒车速度
+  max_vel_y: 0.0
+  max_vel_theta: 1
+#max_vel_theta: 3.14
+  acc_lim_x: 0.5 #0.35 # 0 means not lim
+  acc_lim_y: 0.0
+  acc_lim_theta: 2 #2 #1.57
+  min_turning_radius: 0 # 0 for diff-drive robot (can turn on place!)
+
+
+  footprint_model: # 投影模型 # types: "point", "circular", "line", "two_circles", "polygon"
+    type: "line" 
+    radius: 0.1 # for type "circular"
+    line_start: [-0.12, 0.0] # for type "line"
+    line_end: [0.12, 0.0] # for type "line"
+    front_offset: 0.16 # for type "two_circles"
+    front_radius: 0.16 # for type "two_circles"
+    rear_offset: 0.16 # for type "two_circles"
+    rear_radius: 0.16 # for type "two_circles"
+    vertices: [[0.171, -0.128], [0.171, 0.128],[-0.171, 0.128], [-0.171, -0.128]] # for polygen
+
+  # GoalTolerance
+
+  xy_goal_tolerance: 0.2
+  yaw_goal_tolerance: 0.3 # defualt 0.3
+  free_goal_vel: False # default False | 设为False时，车辆到达终点时的目标速度为0，否则即全速冲线
+  complete_global_plan: True
+
+  # Obstacles
+
+  min_obstacle_dist: 0.28 # default 0.25 | 与障碍物的最小期望距离 This value must also include our robot radius, since footprint_model is set to "point".
+  inflation_dist: 0.6 # default 0.6 | 障碍物周围的缓冲区，进缓冲区会导致规划器减速,需要比min_obstacle_dist大
+  include_costmap_obstacles: True # 必须设置成true才能规避实时探测到的障碍
+  costmap_obstacles_behind_robot_dist: 1.0 # default 1.5 为了允许安全的转弯行为，该值应该是非零的。 较高的值包括更多优化障碍。考虑后方n米范围内的障碍物，设置的越大，考虑范围越广
+  obstacle_poses_affected: 10 # default 15 offical 30 | 因为障碍物而受到影响的poses数量（基于距离障碍物最近的pose，向两边扩展的点数）
+
+  include_dynamic_obstacles: False # default true | 是否将动态障碍物预测为速度模型
+  dynamic_obstacle_inflation_dist: 0.15 # default 0.6 | 动态障碍物的膨胀范围
+  
+
+  # Optimization
+
+  no_inner_iterations: 2 # 被外循环调用后内循环执行优化次数#############################
+  no_outer_iterations: 2 # 执行的外循环的优化次数###################################
+  optimization_activate: True # 激活优化
+  optimization_verbose: False # 打印优化过程详情
+  penalty_epsilon: 0.1 # default 0.1 会为速度的约束提供一个缓冲的效果，就是在到达速度限制前会产生一定的惩罚让其提前减速达到缓冲的效果。
+  obstacle_cost_exponent: 4
+  weight_max_vel_x: 2 # default 2 | 在整个运动过程中以主要以高速还是低速运行，则是看这些权重的分配
+  weight_max_vel_theta: 0.8 #default 1
+  weight_acc_lim_x: 1 # defualt 1
+  weight_acc_lim_theta: 0.8
+  weight_kinematics_nh: 1000 # default 1000| 面向non-holonomic robots的运动学约束的权重
+  weight_kinematics_forward_drive: 1000 # default 1 | 0~1000，倒车惩罚权重，越大越不容易倒车
+  weight_kinematics_turning_radius: 200 # default 1 | 0~1000 机器人最小转向半径的权重，越大则越容易达到最小转向半径的情况
+  weight_optimaltime: 2 #zf3 default 1 | 最优时间权重。must be > 0 如果大了，那么车会在直道上快速加速，并且路径规划的也会切内道，这个参数越小，整个过程的车速会越稳定
+  weight_shortest_path: 0
+  weight_obstacle: 30 #zf20 default 100 避障在整个优化函数中的权重
+  weight_inflation: 0.3  #zf0.2
+  weight_dynamic_obstacle: 10 # default 10
+  weight_dynamic_obstacle_inflation: 0.2
+  weight_viapoint: 1 # default 1 | 提高和降低会明显改变输出轨迹的跟随力度
+  weight_adapt_factor: 2 # default 2 | 
+
+  # Homotopy Class Planner
+
+  enable_homotopy_class_planning: False # 开启多条路径备选
+  enable_multithreading: False
+  max_number_classes: 1 # 最大备选路径数量
+  selection_cost_hysteresis: 1.0
+  selection_prefer_initial_plan: 0.9
+  selection_obst_cost_scale: 100.0
+  selection_alternative_time_cost: False
+
+  roadmap_graph_no_samples: 15
+  roadmap_graph_area_width: 5
+  roadmap_graph_area_length_scale: 1.0
+  h_signature_prescaler: 0.5
+  h_signature_threshold: 0.1
+  obstacle_heading_threshold: 0.45
+  switching_blocking_period: 0.0
+  viapoints_all_candidates: True
+  delete_detours_backwards: True
+  max_ratio_detours_duration_best_duration: 3.0
+  visualize_hc_graph: False
+  visualize_with_time_as_z_axis_scale: False
+
+  # Recovery
+
+  shrink_horizon_backup: True
+  shrink_horizon_min_duration: 10
+  oscillation_recovery: True
+  oscillation_v_eps: 0.1
+  oscillation_omega_eps: 0.1
+  oscillation_recovery_min_duration: 10
+  oscillation_filter_duration: 10
+

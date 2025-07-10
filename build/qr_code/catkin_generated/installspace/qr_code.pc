@@ -1,0 +1,8 @@
+prefix=/home/ucar/lby_ws/install
+
+Name: qr_code
+Description: Description of qr_code
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

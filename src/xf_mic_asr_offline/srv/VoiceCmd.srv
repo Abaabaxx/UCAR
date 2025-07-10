@@ -1,0 +1,6 @@
+# 请求部分 - 指定语音指令
+string voice_cmd
+---
+# 响应部分 - 返回播放结果
+bool success
+string message

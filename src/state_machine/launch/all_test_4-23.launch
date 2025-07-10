@@ -1,0 +1,11 @@
+<launch>
+    <!-- 导航模块 -->
+    <include file="$(find ucar_nav)/launch/test.launch" />
+
+    <!-- 语音识别模块 -->
+    <include file="$(find xf_mic_asr_offline)/launch/xf_mic_asr_offline.launch" />
+
+    <!-- 状态机节点 -->
+    <node pkg="state_machine" type="robot_state_machine_test1_4-23.py" name="state_machine_node" output="screen">
+    </node>
+</launch>

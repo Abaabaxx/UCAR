@@ -1,0 +1,126 @@
+# =====================================================================
+# TebLocalPlannerROS 参数配置 (结构化注释版 - 基于用户提供的值)
+# =====================================================================
+# 说明：本文件包含 TEB (Timed Elastic Band) 局部路径规划器的参数配置。
+# TEB 是一个基于优化的规划器，其行为高度依赖于这些参数的权衡。
+# 请根据您的机器人特性、传感器精度、计算能力和应用场景仔细测试与调整。
+# =====================================================================
+# 该版本修改了min_obstacle_dist,该值是在TEB规划的局部路径上，放置 footprint 矩形框后，这个框的任意一个点，要距离静态地图黑色像素点的最小距离。
+
+
+TebLocalPlannerROS:
+
+  # === 1. 基础设置 ===
+  odom_topic: odom             # 里程计话题名称
+
+  # === 2. 轨迹参数 ===
+  # --- 轨迹生成与离散化 ---
+  teb_autosize: True             # 自动调整轨迹中的姿态点数量 (推荐)
+  dt_ref: 0.3                    # 轨迹的时间分辨率(秒)。较小值模拟更精细，较大值(>0.6)可能导致轨迹不可行。
+  dt_hysteresis: 0.05            # 时间分辨率的迟滞量，用于防止频繁切换。
+  max_samples: 500               # 轨迹中允许的最大姿态点数量。
+
+  # --- 全局路径跟随与处理 ---
+  global_plan_overwrite_orientation: True # 允许TEB修改全局路径点的朝向以生成更平滑轨迹 (推荐)。
+  allow_init_with_backwards_motion: False # 不允许以倒车开始执行新轨迹。
+  max_global_plan_lookahead_dist: 1.0   # (米) TEB参考前方全局路径的最大距离。值越小，越贴合全局路径，但可能牺牲避障灵活性。
+  global_plan_viapoint_sep: 0.5       # (米) 在全局路径上每隔多远插入一个吸引TEB的路径点(via-point)。减小此值会增强全局路径跟随性。
+  global_plan_prune_distance: 1         # (米) 清理机器人后方多远距离之外的全局路径点。
+
+  # --- 轨迹可行性检查 ---
+  exact_arc_length: False          # 是否精确计算弧长（计算量稍大）。
+  feasibility_check_no_poses: 1    # 【！！！高风险！！！】检查轨迹是否碰撞时，仅检查从起点开始的几个姿态点。值为1表示只检查第一个点，**极大地削弱了碰撞检测的可靠性**，可能导致后续轨迹碰撞。**强烈建议增加此值 (例如 3-5)**。
+  publish_feedback: False          # 是否发布详细的优化过程反馈消息。
+
+  # === 3. 机器人参数 ===
+  # --- 运动学限制 ---
+  max_vel_x: 1.1                   # (米/秒) 最大前进速度。
+  max_vel_x_backwards: 0.4         # (米/秒) 最大后退速度。
+  max_vel_y: 0.0                   # (米/秒) 最大横向速度 (差速驱动通常为0)。
+  max_vel_theta: 1.0               # (弧度/秒) 最大角速度。
+  acc_lim_x: 0.5                   # (米/秒^2) 最大X轴加速度。
+  acc_lim_y: 0.0                   # (米/秒^2) 最大Y轴加速度 (差速驱动通常为0)。
+  acc_lim_theta: 2.0               # (弧度/秒^2) 最大角加速度。
+  min_turning_radius: 0.0          # (米) 最小转弯半径 (0 表示差速驱动，可原地旋转)。
+
+  # --- 机器人足迹模型 ---
+  # 用于碰撞检测和距离计算。
+  # ———————————————————————————————————————————修改这里————————————————————————————————————————
+  footprint_model:
+    type: "polygon"                  
+    vertices: [[0.17, -0.125], [0.17, 0.125], [-0.17, 0.125], [-0.17, -0.125]]  # 长度为0.34，宽度为0.25的矩形足迹
+
+  # === 4. 目标容忍度 ===
+  xy_goal_tolerance: 0.2           # (米) 到达目标点的最终位置容忍半径。
+  yaw_goal_tolerance: 0.3          # (弧度) 到达目标点的最终朝向容忍误差。
+  free_goal_vel: False             # 到达目标点时是否允许有速度 (False 表示要求速度为0)。
+  complete_global_plan: True       # 通常保持 True。
+
+  # === 5. 障碍物处理 ===
+  # --- 障碍物距离与膨胀 ---
+  min_obstacle_dist: 0.08          # 【！！！关键安全参数！！！】(米) 轨迹与障碍物允许的最小距离。**重要:** 对于 "line" 或 "point" 足迹，此值 **必须** 大于等于 **(机器人实际物理半径 + 期望的安全间隙)**。请务必根据机器人实际尺寸核对！
+  inflation_dist: 0.6              # (米) 障碍物的膨胀距离。轨迹进入此区域会增加代价。应大于 min_obstacle_dist。
+  include_costmap_obstacles: True  # **必须为 True** 才能让 TEB 考虑并避开局部代价地图中的障碍物。
+  costmap_obstacles_behind_robot_dist: 1.0 # (米) 考虑机器人后方多远范围内的障碍物，有助于转弯和后退安全。
+  obstacle_poses_affected: 10      # (整数) 当轨迹接近障碍物时，受障碍物代价影响的姿态点数量（以最近点为中心向两侧扩展）。较小值使避障反应更局部化。
+
+  # --- 动态障碍物 (当前已禁用) ---
+  include_dynamic_obstacles: False   # 是否启用动态障碍物处理 (当前为 False)。
+  dynamic_obstacle_inflation_dist: 0.15 # (若启用) 动态障碍物的膨胀距离。
+
+  # === 6. 优化参数 ===
+  # --- 优化器控制 ---
+  no_inner_iterations: 2           # 内部优化循环的迭代次数。
+  no_outer_iterations: 2           # 外部优化循环的迭代次数。 **较低的迭代次数会加快计算速度，但可能牺牲轨迹的最优性和平滑性。**
+  optimization_activate: True      # 激活优化器。
+  optimization_verbose: False      # 是否打印详细的优化过程信息。
+  penalty_epsilon: 0.1             # 约束的软边界阈值，提供缓冲效果。
+  obstacle_cost_exponent: 4        # 障碍物代价函数的指数。值越高，靠近障碍物时代价增长越剧烈，避障反应越强硬。
+
+  # --- 优化权重 (核心调参部分，决定机器人行为倾向) ---
+  # 这些权重决定了各种目标的相对重要性。
+  weight_max_vel_x: 2              # 倾向于达到最大X向速度的权重。
+  weight_max_vel_theta: 0.8        # 倾向于达到最大角速度的权重。
+  weight_acc_lim_x: 1              # 惩罚超过X向加速度限制的权重。
+  weight_acc_lim_theta: 0.8        # 惩罚超过角加速度限制的权重。
+  weight_kinematics_nh: 1000       # (极高) 强制满足非完整约束(如差速驱动)的权重。
+  weight_kinematics_forward_drive: 1000 # (极高) **强烈惩罚后退**的权重。值越大，机器人越不愿意倒车。
+  weight_kinematics_turning_radius: 200 # 最小转弯半径的权重 (对 min_turning_radius=0 影响不大)。
+  weight_optimaltime: 2.0            # (较高) **倾向于最小化通行时间**的权重。值越高，机器人越倾向于高速行驶和“抄近道”。
+  weight_shortest_path: 0          # **(已禁用)** 倾向于最短几何路径的权重。设为0表示不关心路径长度，只关心时间。
+  weight_obstacle: 30.0            # (相对较低) 避开障碍物 (min_obstacle_dist) 的权重。配合高 exponent，意味着在中距离时惩罚不高，但在极近距离时惩罚剧增。
+  weight_inflation: 0.3            # (较低) 避开障碍物膨胀区域 (inflation_dist) 的权重。机器人不太在乎进入膨胀区。
+  weight_dynamic_obstacle: 10      # (若启用) 避开动态障碍物的权重。
+  weight_dynamic_obstacle_inflation: 0.2 # (若启用) 避开动态障碍物膨胀区的权重。
+  weight_viapoint: 1               # 吸引轨迹靠近全局路径上的 via-point 的权重。
+  weight_adapt_factor: 2           # 用于调整某些权重的自适应因子。
+
+  # === 7. 同伦类规划 (多路径选择 - 当前已禁用) ===
+  enable_homotopy_class_planning: False # 是否启用同伦类规划（探索拓扑不同的路径，如从障碍物两边绕行）。禁用可减少计算量，但在某些场景可能找不到解。
+  enable_multithreading: False     # (若启用) 是否为同伦类规划启用多线程。
+  max_number_classes: 1            # (若启用) 最大探索的路径类别数量。
+  selection_cost_hysteresis: 1.0   # (若启用) 路径切换的成本迟滞。
+  selection_prefer_initial_plan: 0.9 # (若启用) 倾向于保持初始路径的因子。
+  selection_obst_cost_scale: 100.0 # (若启用) 障碍物成本在路径选择中的缩放因子。
+  selection_alternative_time_cost: False # (若启用) 是否考虑备选路径的时间成本。
+  roadmap_graph_no_samples: 15     # (若启用) 路径图采样点数。
+  roadmap_graph_area_width: 5      # (若启用) 路径图区域宽度。
+  roadmap_graph_area_length_scale: 1.0 # (若启用) 路径图区域长度比例。
+  h_signature_prescaler: 0.5       # (若启用) H签名预分频器。
+  h_signature_threshold: 0.1       # (若启用) H签名阈值。
+  obstacle_heading_threshold: 0.45 # (若启用) 障碍物朝向阈值。
+  switching_blocking_period: 0.0   # (若启用) 路径切换后的阻塞时间。
+  viapoints_all_candidates: True   # (若启用) 是否为所有候选路径计算 via-points。
+  delete_detours_backwards: True   # (若启用) 是否删除包含后退的绕行路径。
+  max_ratio_detours_duration_best_duration: 3.0 # (若启用) 允许绕行路径与最佳路径的最大时长比例。
+  visualize_hc_graph: False        # (若启用) 是否可视化同伦类图。
+  visualize_with_time_as_z_axis_scale: False # (若启用) 可视化时是否用时间作为Z轴。
+
+  # === 8. 恢复行为 ===
+  shrink_horizon_backup: True      # 允许在规划失败时缩短规划视界作为恢复策略。
+  shrink_horizon_min_duration: 10  # 缩短视界的最小持续时间。
+  oscillation_recovery: True       # 启用震荡恢复机制 (防止机器人来回卡死)。
+  oscillation_v_eps: 0.1           # 速度震荡阈值。
+  oscillation_omega_eps: 0.1       # 角速度震荡阈值。
+  oscillation_recovery_min_duration: 10 # 震荡恢复激活的最小持续时间。
+  oscillation_filter_duration: 10  # 震荡检测的滤波时间。

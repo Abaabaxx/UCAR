@@ -1,0 +1,11 @@
+<launch>
+    <!-- 导航模块 -->
+    <include file="$(find ucar_nav)/launch/ucar_nav.launch" />
+
+    <!-- 语音识别模块 -->
+    <include file="$(find xf_mic_asr_offline)/launch/xf_mic_asr_offline.launch" />
+
+    <!-- 状态机节点 -->
+    <node pkg="state_machine" type="3_nav_to_qr.py" name="state_machine_node" output="screen">
+    </node>
+</launch>

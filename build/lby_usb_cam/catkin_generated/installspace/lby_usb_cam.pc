@@ -1,0 +1,8 @@
+prefix=/home/ucar/lby_ws/install
+
+Name: lby_usb_cam
+Description: Description of lby_usb_cam
+Version: 0.3.4
+Cflags: -I${prefix}/include
+Libs: -L${prefix}/lib -llby_usb_cam
+Requires: 

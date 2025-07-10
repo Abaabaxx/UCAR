@@ -1,0 +1,4 @@
+<launch>
+  <!-- 启动二维码识别节点 -->
+  <node name="qr_detect" pkg="qr_code" type="qr_detect.py" output="screen" />
+</launch>

@@ -1,0 +1,6 @@
+# CMake generated Testfile for 
+# Source directory: /home/ucar/lby_ws/src/lby_usb_cam
+# Build directory: /home/ucar/lby_ws/build/lby_usb_cam
+# 
+# This file includes the relevant testing commands required for 
+# testing this directory and lists subdirectories to be tested as well.

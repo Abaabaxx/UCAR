@@ -1,0 +1,74 @@
+[31m[1mCMake Error[0m at /usr/share/cmake-3.10/Modules/FindCUDA.cmake:1801 (add_library):
+  Cannot find source file:
+
+    DARKNET_PATH-NOTFOUND/src/activation_layer.c
+
+  Tried extensions .c .C .c++ .cc .cpp .cxx .m .M .mm .h .hh .h++ .hm .hpp
+  .hxx .in .txx
+[36mCall Stack (most recent call first):[0m
+  CMakeLists.txt:148 (cuda_add_library)
+
+
+[33m[1mCMake Warning[0m at /usr/share/cmake-3.10/Modules/FindCUDA.cmake:1801 (add_library):
+  Cannot generate a safe runtime search path for target darknet_ros_nodelet
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libSM.so.6] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+    runtime library [libICE.so.6] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+    runtime library [libX11.so.6] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+    runtime library [libXext.so.6] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+    runtime library [libuuid.so.1] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+
+  Some of these libraries may not be found correctly.
+[36mCall Stack (most recent call first):[0m
+  CMakeLists.txt:164 (cuda_add_library)
+
+
+[33m[1mCMake Warning[0m at /usr/share/cmake-3.10/Modules/FindCUDA.cmake:1851 (add_executable):
+  Cannot generate a safe runtime search path for target darknet_ros because
+  files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libSM.so.6] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+    runtime library [libICE.so.6] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+    runtime library [libX11.so.6] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+    runtime library [libXext.so.6] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+    runtime library [libuuid.so.1] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+
+  Some of these libraries may not be found correctly.
+[36mCall Stack (most recent call first):[0m
+  CMakeLists.txt:160 (cuda_add_executable)
+
+
+[33m[1mCMake Warning[0m at /usr/share/cmake-3.10/Modules/FindCUDA.cmake:1801 (add_library):
+  Cannot generate a safe runtime search path for target darknet_ros_lib
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libSM.so.6] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+    runtime library [libICE.so.6] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+    runtime library [libX11.so.6] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+    runtime library [libXext.so.6] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+    runtime library [libuuid.so.1] in /usr/lib/aarch64-linux-gnu may be hidden by files in:
+      /home/ucar/miniforge3/envs/lby_ucar/lib
+
+  Some of these libraries may not be found correctly.
+[36mCall Stack (most recent call first):[0m
+  CMakeLists.txt:148 (cuda_add_library)
+
+

@@ -1,0 +1,41 @@
+<launch>
+    <!-- 启动激光雷达驱动节点 -->
+    <include file="$(find ydlidar)/launch/ydlidar.launch" />
+
+    <!-- 启动底盘控制节点 -->
+    <include file="$(find ucar_controller)/launch/base_driver.launch" />
+
+    <!-- 启动地图服务器，加载已保存的地图文件 -->
+    <node pkg="map_server" type="map_server" name="map_server" args="$(find tutorial)/maps/test.yaml"/>
+
+    <!-- 启动自适应蒙特卡洛定位(AMCL)节点，用于机器人在已知地图中的定位 -->
+    <node pkg="amcl" type="amcl" name="amcl"/>
+
+    <!-- 启动 move_base 节点，用于机器人导航 -->
+  <node pkg="move_base" type="move_base" name="move_base" output="screen" launch-prefix="bash -c 'sleep 5; $0 $@' ">
+      <!-- 加载代价地图的通用参数，应用于全局和局部代价地图 -->
+      <rosparam file="$(find tutorial)/config/costmap_common_params.yaml" command="load" ns="global_costmap"/>
+      <rosparam file="$(find tutorial)/config/costmap_common_params.yaml" command="load" ns="local_costmap"/>
+
+      <!-- 加载局部代价地图的特定参数 -->
+      <rosparam file="$(find tutorial)/config/local_costmap_params.yaml" command="load" ns="local_costmap"/> <!-- Removed namespace here, assuming params are directly under local_costmap in the file -->
+      <!-- Correction: Keep the namespace if the YAML file is structured like local_costmap: { params... } -->
+       <!-- Assuming YAMLs are correctly structured, original parameter loading is fine: -->
+      <!-- <rosparam file="$(find tutorial)/config/local_costmap_params.yaml" command="load"/> -->
+      <!-- <rosparam file="$(find tutorial)/config/global_costmap_params.yaml" command="load"/> -->
+
+      <!-- Let's stick to the original loading method which seems correct based on your YAML -->
+      <rosparam file="$(find tutorial)/config/local_costmap_params.yaml" command="load"/>
+      <rosparam file="$(find tutorial)/config/global_costmap_params.yaml" command="load"/>
+
+
+      <!-- 设置全局路径规划器，用于生成从起点到目标点的整体路径 -->
+      <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
+
+      <!-- 设置局部路径规划器，用于实时避障和局部路径规划 -->
+      <param name="base_local_planner" value="wpbh_local_planner/WpbhLocalPlanner"/>
+    </node>
+
+    <!-- 启动 RViz 可视化工具，加载导航相关的配置文件 -->
+    <!-- <node pkg="rviz" type="rviz" name="rviz" args="-d $(find tutorial)/rviz/nav.rviz"/> -->
+</launch>

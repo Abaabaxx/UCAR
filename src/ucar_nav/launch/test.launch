@@ -1,0 +1,51 @@
+<launch>
+    <!-- 底盘驱动 -->
+    <include file="$(find ucar_controller)/launch/base_driver.launch" />
+
+    <!-- 激光雷达驱动 -->
+    <include file="$(find ydlidar)/launch/ydlidar.launch" />
+
+    <!-- 加载地图服务 -->
+    <node name="map_server" pkg="map_server" type="map_server" args="$(find ucar_nav)/maps/4-27_map_test.yaml" output="screen">
+        <param name="frame_id" value="map" />
+    </node>
+
+    <!-- 加载机器人URDF模型描述 -->
+    <param name="robot_description" textfile="$(find ucar_nav)/urdf/xfcar.urdf" />
+
+    <!-- 自适应蒙特卡洛定位 (AMCL) -->
+    <include file="$(find ucar_nav)/config/amcl_test/4-27_amcl_test.launch" />
+
+    <!-- move_base导航节点配置 -->
+    <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+        <!-- 规划器配置 -->
+        <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
+        <param name="planner_frequency" value="10.0" />
+        <param name="planner_patience" value="5.0" />
+        <param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS" />
+        
+
+        <!-- 加载导航相关配置文件 -->
+        <!-- 代价地图相关配置 -->
+        <!-- 1. costmap通用参数: 配置机器人尺寸、传感器、膨胀层等公共参数 -->
+        <rosparam file="$(find ucar_nav)/config/move_base_test/costmap_common_test/4-25_common_test0.yaml" command="load" ns="global_costmap" />
+        <rosparam file="$(find ucar_nav)/config/move_base_test/costmap_common_test/4-25_common_test0.yaml" command="load" ns="local_costmap" />
+
+        <!-- 2. 局部代价地图: 配置更新频率、地图大小、跟随机器人的行为等 -->
+        <rosparam file="$(find ucar_nav)/config/move_base_test/local_costmap_test/4-25_local_test0.yaml" command="load" />
+
+        <!-- 3. 全局代价地图: 配置静态地图、更新频率、地图范围等 -->
+        <rosparam file="$(find ucar_nav)/config/move_base_test/global_costmap_test/4-25_global_test0.yaml" command="load" />
+
+        <!-- 路径规划器相关配置 -->
+        <!-- 1. 全局规划器 -->
+        <rosparam file="$(find ucar_nav)/config/move_base/global_planner_params.yaml" command="load" />
+        <!-- 2. 局部规划器(TEB) -->
+        <rosparam file="$(find ucar_nav)/config/move_base_test/teb_test/4-28_teb_test0.yaml" command="load" />
+    </node>
+
+    <!-- 机器人状态发布 -->
+    <node pkg="joint_state_publisher" name="joint_state_publisher" type="joint_state_publisher" />
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" />
+
+</launch>

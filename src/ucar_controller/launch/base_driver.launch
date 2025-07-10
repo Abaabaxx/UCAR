@@ -1,0 +1,15 @@
+<launch>
+  <node pkg="ucar_controller" name="base_driver" type="base_driver" output="screen" >
+    <rosparam command="load" file="$(find ucar_controller)/config/driver_params_mini.yaml" />
+  </node>
+  <!-- <include file="$(find rf2o_laser_odometry)/launch/rf2o_laser_odometry.launch" > </include> -->
+
+  <!-- <include file="$(find robot_pose_ekf)/robot_pose_ekf.launch" > </include>
+  <node pkg="robot_pose_ekf" type="1.py" name="odom_ekf" output="screen">
+  </node> -->
+  <!-- <include file="$(find rf2o_laser_odometry)/launch/rf2o_laser_odometry.launch" > </include> -->
+
+
+
+  <!-- <node pkg="joy" name="joy_node" type="joy_node"/> -->
+</launch> 
