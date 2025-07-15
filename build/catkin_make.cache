@@ -1,2 +1,0 @@
-board_detect:darknet_ros/darknet_ros:darknet_ros/darknet_ros_msgs:lby_usb_cam:qr_code:state_machine:test:tools:tutorial:ucar_controller:ucar_nav:xf_mic_asr_offline:ydlidar
--DCATKIN_DEVEL_PREFIX=/home/ucar/lby_ws/devel -DCMAKE_INSTALL_PREFIX=/home/ucar/lby_ws/install -G Unix Makefiles

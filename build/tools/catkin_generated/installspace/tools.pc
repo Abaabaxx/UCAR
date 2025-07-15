@@ -1,8 +1,0 @@
-prefix=/home/ucar/lby_ws/install
-
-Name: tools
-Description: Description of tools
-Version: 0.0.0
-Cflags: 
-Libs: -L${prefix}/lib 
-Requires: 
