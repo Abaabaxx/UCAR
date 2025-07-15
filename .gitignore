@@ -36,3 +36,6 @@ __pycache__/
 *.so
 *.a
 *.out
+index.html*
+.catkin_workspace
+datasets/
