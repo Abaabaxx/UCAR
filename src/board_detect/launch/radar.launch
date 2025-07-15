@@ -1,4 +1,6 @@
 <launch>
+    <!--该launch文件提供了找板调试阶段的基础环境-->
+    
     <!-- 底盘驱动 -->
     <include file="$(find ucar_controller)/launch/base_driver.launch" />
     

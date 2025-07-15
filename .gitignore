@@ -36,6 +36,12 @@ __pycache__/
 *.so
 *.a
 *.out
+
+# =========================
+# 其他用户自定义文件
+# =========================
 index.html*
 .catkin_workspace
 datasets/
+src/board_detect/goals/
+src/ucar_controller/log_info
