@@ -1,0 +1,6 @@
+<launch>
+    <!-- 加载地图服务 -->
+    <node name="map_server" pkg="map_server" type="map_server" args="$(find ucar_nav)/maps/ucar_map.yaml" output="screen">
+        <param name="frame_id" value="map" />
+    </node>
+</launch>

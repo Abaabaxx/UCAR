@@ -6,9 +6,7 @@
     <include file="$(find ydlidar)/launch/ydlidar.launch" />
 
     <!-- 加载地图服务 -->
-    <node name="map_server" pkg="map_server" type="map_server" args="$(find ucar_nav)/maps/4-27_map_test.yaml" output="screen">
-        <param name="frame_id" value="map" />
-    </node>
+    <include file="$(find ucar_nav)/launch/ucar_map.launch" />
 
     <!-- 加载机器人URDF模型描述 -->
     <param name="robot_description" textfile="$(find ucar_nav)/urdf/xfcar.urdf" />
