@@ -1,4 +1,5 @@
 <launch>
+  <!-- 初始位姿 x=1.25m y=3.50m 角度90°-->
     <!--该版本新增了初始位姿的默认值设置，确保小车启动时能够位于MDP地图中的正确位置和朝向。-->
   <node pkg="amcl" type="amcl" name="amcl">
     <!-- Publish scans from best pose at a max of 10 Hz -->
