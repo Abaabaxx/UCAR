@@ -15,36 +15,8 @@
     <include file="$(find ucar_nav)/config/amcl_test/amcl_origin.launch" />
 
     <!-- move_base导航节点配置 -->
-    <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
-        <!-- 规划器配置 -->
-        <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
-        <param name="planner_frequency" value="10.0" />
-        <param name="planner_patience" value="5.0" />
-        <param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS" />
-        
-        <!-- 备注: 当需要使用EKF时，取消下面的注释 -->
-        <!-- <remap from="/odom" to="/odom_ekf"/> -->
-
-        <!-- 加载导航相关配置文件 -->
-        <!-- 代价地图相关配置 -->
-        <!-- 1. costmap通用参数: 配置机器人尺寸、传感器、膨胀层等公共参数 -->
-        <rosparam file="$(find ucar_nav)/config/move_base/costmap_common_params.yaml" command="load" ns="global_costmap" />
-        <rosparam file="$(find ucar_nav)/config/move_base/costmap_common_params.yaml" command="load" ns="local_costmap" />
-
-        <!-- 2. 局部代价地图: 配置更新频率、地图大小、跟随机器人的行为等 -->
-        <rosparam file="$(find ucar_nav)/config/move_base/local_costmap_params.yaml" command="load" />
-
-        <!-- 3. 全局代价地图: 配置静态地图、更新频率、地图范围等 -->
-        <rosparam file="$(find ucar_nav)/config/move_base/global_costmap_params.yaml" command="load" />
-
-        <!-- 路径规划器相关配置 -->
-        <!-- 1. 全局规划器 -->
-        <rosparam file="$(find ucar_nav)/config/move_base/global_planner_params.yaml" command="load" />
-
-        <!-- 2. 局部规划器(TEB) -->
-        <rosparam file="$(find ucar_nav)/config/move_base_test/teb_test/4-28_teb_test0.yaml" command="load" />
-    </node>
-
+    <include file="$(find ucar_nav)/launch/move_base.launch" />
+    
     <!-- 机器人状态发布 -->
     <node pkg="joint_state_publisher" name="joint_state_publisher" type="joint_state_publisher" />
     <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" />
