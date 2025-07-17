@@ -1,5 +1,5 @@
 <launch>
-  <!-- 初始位姿 x=1.25m y=4.00m 角度-90°-->
+  <!-- 初始位姿 x=1.25m y=3.50m 角度90°-->
     <!--该版本新增了初始位姿的默认值设置，确保小车启动时能够位于MDP地图中的正确位置和朝向。-->
   <node pkg="amcl" type="amcl" name="amcl">
     <!-- Publish scans from best pose at a max of 10 Hz -->
@@ -42,12 +42,12 @@
     <!-- == 添加的默认初始位姿参数 == -->
     <!-- ======================================================== -->
     <param name="initial_pose_x"       value="1.25"/>   <!-- 设置 X = 1.25m -->
-    <param name="initial_pose_y"       value="4.0"/>   <!-- 设置 Y = 3.75m -->
-    <param name="initial_pose_a"       value="-1.5708"/>    <!-- 设置 Yaw = -90 度 -->
+    <param name="initial_pose_y"       value="3.50"/>   <!-- 设置 Y = 3.25m -->
+    <param name="initial_pose_a"       value="1.5708"/>    <!-- 设置 Yaw = 90 度 -->
 
     <!-- 可选：设置初始位姿的协方差 (不确定性/粒子分散程度) -->
-    <param name="initial_cov_xx"       value="0.0004"/>   <!-- X 方向标准差约 0.02m -->
-    <param name="initial_cov_yy"       value="0.0004"/>   <!-- Y 方向标准差约 0.02m -->
+    <param name="initial_cov_xx"       value="0.0025"/>   <!-- X 方向标准差约 0.05m -->
+    <param name="initial_cov_yy"       value="0.0025"/>   <!-- Y 方向标准差约 0.05m -->
     <param name="initial_cov_aa"       value="0.0171"/> <!-- Yaw 方向标准差约 7 度 -->
     <!-- ======================================================== -->
 

@@ -58,7 +58,7 @@ class ClusterVisualizer:
         self.max_length = 0.60  # 最大长度（米）
         
         # 新增：定义ROI多边形区域
-        self.polygon = Polygon([(-0.2, 3.5), (2.7, 3.5), (2.7, 5.2), (-0.2, 5.2)])
+        self.polygon = Polygon([(-0.2, 4), (2.7, 4), (2.7, 1.7), (-0.2, 1.7)])
         
         rospy.loginfo("ClusterVisualizer initialized, waiting for scan data...")
         rospy.loginfo("Filtering clusters with length between %.2fm and %.2fm", self.min_length, self.max_length)
@@ -89,7 +89,7 @@ class ClusterVisualizer:
         marker.color.a = 0.8   # 半透明
         
         # 添加多边形的顶点，注意要闭合
-        vertices = [(-0.2, 3.5), (2.7, 3.5), (2.7, 5.2), (-0.2, 5.2), (-0.2, 3.5)]
+        vertices = [(-0.2, 4), (2.7, 4), (2.7, 1.7), (-0.2, 1.7), (-0.2, 4)]
         for vertex in vertices:
             p = self.create_point(vertex[0], vertex[1], 0.05)  # 稍微抬高一点，避免被地图覆盖
             marker.points.append(p)
