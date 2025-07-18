@@ -75,7 +75,7 @@ class ClusterVisualizer:
         self.match_angle_threshold_rad = np.radians(self.match_angle_threshold_deg)
         
         # 目标目录路径
-        self.goals_dir = "/home/ucar/lby_ws/src/board_detect/goals"
+        self.goals_dir = "/home/ucar/lby_ws/src/board_detect/goals_up"
         
         print("节点已初始化，将处理 {} 帧激光扫描数据...".format(self.num_scans_to_average))
 
