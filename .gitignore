@@ -43,5 +43,6 @@ __pycache__/
 index.html*
 .catkin_workspace
 datasets/
-src/board_detect/goals/
+src/board_detect/goals_up/
+src/board_detect/goals_down/
 src/ucar_controller/log_info
