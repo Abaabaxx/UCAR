@@ -1,0 +1,10 @@
+<launch>
+    <!-- 导航模块 -->
+    <include file="$(find ucar_nav)/launch/base.launch" />
+
+    <!-- 自适应蒙特卡洛定位 (AMCL) -->
+    <include file="$(find ucar_nav)/config/amcl_test/amcl_board_origin.launch" /> 
+
+    <node pkg="board_detect_state_machine" type="show_goals.py" name="static_goal_publisher" output="screen"/>
+
+</launch>
