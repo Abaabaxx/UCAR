@@ -4,6 +4,9 @@
 
     <!-- 自适应蒙特卡洛定位 (AMCL) -->
     <include file="$(find ucar_nav)/config/amcl_test/amcl_board_origin.launch" /> 
+    
+    <!-- USB摄像头模块 -->
+    <include file="$(find lby_usb_cam)/launch/usb_cam_noimg_10hz.launch" />
 
     <!-- 状态机节点 -->
     <node pkg="board_detect_state_machine" type="5_pick_up_goods.py" name="board_detect_state_machine_node" output="screen">
