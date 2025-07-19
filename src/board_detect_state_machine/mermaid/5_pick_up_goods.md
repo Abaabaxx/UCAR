@@ -7,7 +7,7 @@ stateDiagram-v2
     NAVIGATE_TO_DOWN_POINT: 3-导航至下半平面点
     SEARCH_DOWN_BOARD: 4-寻找下平面板子
     PICK_UP_GOODS: 5-拾取货物
-    ANNOUNCE_GOODS: 6-
+    SPEAK_GOODS: 6-播报货物
     ERROR: 99-错误状态
 
     %% 定义初始状态
@@ -28,7 +28,7 @@ stateDiagram-v2
     SEARCH_DOWN_BOARD --> PICK_UP_GOODS: Event.SEARCH_DONE_SUCCESS
     SEARCH_DOWN_BOARD --> ERROR: Event.SEARCH_DONE_FAILURE
 
-    PICK_UP_GOODS --> ANNOUNCE_GOODS: Event.PICK_UP_DOWN\n(所有板子遍历完毕)
+    PICK_UP_GOODS --> SPEAK_GOODS: Event.PICK_UP_DOWN\n(所有板子遍历完毕)
 
     %% 状态行为说明
     note right of SEARCH_UP_BOARD
@@ -53,7 +53,7 @@ stateDiagram-v2
         3. 循环结束后，触发 PICK_UP_DOWN 事件。
     end note
 
-    note right of ANNOUNCE_GOODS
+    note right of SPEAK_GOODS
         成功路径终点:
         - 打印成功日志。
         - 等待手动重置或开发后续功能。

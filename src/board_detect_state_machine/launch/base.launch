@@ -1,0 +1,8 @@
+<launch>
+    <!-- 导航模块 -->
+    <include file="$(find ucar_nav)/launch/base.launch" />
+
+    <!-- 自适应蒙特卡洛定位 (AMCL) -->
+    <include file="$(find ucar_nav)/config/amcl_test/amcl_board_origin.launch" /> 
+
+</launch>

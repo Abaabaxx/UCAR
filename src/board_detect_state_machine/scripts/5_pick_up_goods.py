@@ -22,7 +22,7 @@ class RobotState(object):
     NAVIGATE_TO_DOWN_POINT = 3
     SEARCH_DOWN_BOARD = 4
     PICK_UP_GOODS = 5
-    ANNOUNCE_GOODS = 6  # 新增状态
+    SPEAK_GOODS = 6  # 新增状态
     ERROR = 99
 
 # 事件常量定义
@@ -378,7 +378,7 @@ class RobotStateMachine(object):
         elif self.current_state == RobotState.PICK_UP_GOODS:
             rospy.loginfo("开始执行多点巡检...")
             self.execute_patrol_sequence()
-        elif self.current_state == RobotState.ANNOUNCE_GOODS:
+        elif self.current_state == RobotState.SPEAK_GOODS:
             rospy.loginfo("已进入[语音播报货物]状态，等待后续功能实现。")
             # 当前状态机流程在此结束，等待开发后续逻辑或手动重启。
             pass
@@ -412,7 +412,7 @@ class RobotStateMachine(object):
                 self.transition(RobotState.ERROR)
         elif self.current_state == RobotState.PICK_UP_GOODS:
             if event == Event.PICK_UP_DOWN:
-                self.transition(RobotState.ANNOUNCE_GOODS)
+                self.transition(RobotState.SPEAK_GOODS)
 
     # 服务回调：启动状态机
     def start_callback(self, req):
