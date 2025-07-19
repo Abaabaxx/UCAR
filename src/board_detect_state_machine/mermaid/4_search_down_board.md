@@ -6,7 +6,7 @@ stateDiagram-v2
     SEARCH_UP_BOARD: 2-寻找上平面板子
     NAVIGATE_TO_DOWN_POINT: 3-导航至下半平面点
     SEARCH_DOWN_BOARD: 4-寻找下平面板子
-    PICK_UP_GOODS: 5-任务成功
+    PICK_UP_GOODS: 5-拾取货物
     ERROR: 99-错误状态
 
     %% 定义初始状态
