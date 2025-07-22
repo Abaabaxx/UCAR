@@ -9,6 +9,7 @@
 #include <serial/serial.h>  //ROS的串口包 http://wjwwood.io/serial/doc/1.1.0/index.html
 #include <math.h>
 #include <fstream>
+#include <array>
 #include <ucar_controller/data_struct.h>
 #include <ucar_controller/GetMaxVel.h>
 #include <ucar_controller/SetMaxVel.h>
@@ -76,6 +77,17 @@ namespace ucarController
 #define MOTOR_MODE_JOY     0
 #define MOTOR_MODE_CMD     1
 #define MOTOR_MODE_MOVE    2
+
+// 硬编码 IMU 协方差 为了 EKF 做准备
+const std::array<double, 9> ORIENTATION_COVARIANCE = 
+    {5.09977222e-08, 0.0, 0.0, 0.0, 1.50312728e-08, 0.0, 0.0, 0.0, 1.0e+06};
+
+const std::array<double, 9> ANGULAR_VELOCITY_COVARIANCE = 
+    {7.92418294e-06, 0.0, 0.0, 0.0, 1.08136697e-05, 0.0, 0.0, 0.0, 1.73386780e-05};
+
+const std::array<double, 9> LINEAR_ACCELERATION_COVARIANCE = 
+    {4.02136306e-03, 0.0, 0.0, 0.0, 3.48930918e-02, 0.0, 0.0, 0.0, 6.08329415e-03};
+
 
 class baseBringup
 {

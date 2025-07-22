@@ -796,6 +796,10 @@ void baseBringup::processIMU(uint8_t head_type)
     imu_data.linear_acceleration.x = -imu_frame_.frame.data.data_pack.accelerometer_x;
     imu_data.linear_acceleration.y = imu_frame_.frame.data.data_pack.accelerometer_y;
     imu_data.linear_acceleration.z = imu_frame_.frame.data.data_pack.accelerometer_z;
+    
+    std::copy(ORIENTATION_COVARIANCE.begin(), ORIENTATION_COVARIANCE.end(), imu_data.orientation_covariance.begin());
+    std::copy(ANGULAR_VELOCITY_COVARIANCE.begin(), ANGULAR_VELOCITY_COVARIANCE.end(), imu_data.angular_velocity_covariance.begin());
+    std::copy(LINEAR_ACCELERATION_COVARIANCE.begin(), LINEAR_ACCELERATION_COVARIANCE.end(), imu_data.linear_acceleration_covariance.begin());
 
     imu_pub_.publish(imu_data);
 
