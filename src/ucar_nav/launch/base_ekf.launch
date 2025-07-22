@@ -15,7 +15,7 @@
 
 
     <!-- move_base导航节点配置 -->
-    <include file="$(find ucar_nav)/launch/move_base.launch" />
+    <include file="$(find ucar_nav)/launch/move_base_ekf.launch" />
     
     <!-- 机器人状态发布 -->
     <node pkg="joint_state_publisher" name="joint_state_publisher" type="joint_state_publisher" />
