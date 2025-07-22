@@ -1,0 +1,12 @@
+<launch>
+  <!-- 启动 robot_localization 包中的 EKF 节点 -->
+  <node pkg="robot_localization" type="ekf_localization_node" name="ekf_localization_filtered" clear_params="true">
+    
+    <!-- 加载我们精心配置的 ekf.yaml 参数文件 -->
+    <rosparam command="load" file="$(find ucar_nav)/ekf/ekf.yaml" />
+
+    <!-- (可选但推荐) 将默认的输出话题名 odometry/filtered 映射到根命名空间下，便于访问 -->
+    <remap from="odometry/filtered" to="/odometry/filtered" />
+
+  </node>
+</launch>
