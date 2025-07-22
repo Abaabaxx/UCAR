@@ -10,8 +10,8 @@ from visualization_msgs.msg import Marker, MarkerArray
 import geometry_msgs.msg
 from std_msgs.msg import ColorRGBA
 
-# 该版本基于显示所有聚类的算法的基础上进行修改，筛选出长度在45厘米到60厘米之间的直线聚类
-# 该版本针对"线拟合与偏差"聚类算法，筛选并可视化长度在45厘米到60厘米之间的直线聚类
+# 该版本基于显示所有聚类的算法的基础上进行修改，筛选出长度在39厘米到60厘米之间的直线聚类
+# 该版本针对"线拟合与偏差"聚类算法，筛选并可视化长度在39厘米到60厘米之间的直线聚类
 # 原始的所有聚类（未经过长度筛选的）不再显示
 
 
@@ -48,7 +48,7 @@ class ClusterVisualizer:
         self.min_points_for_fitting = 4   # 进行线拟合所需的最小点数
         
         # 长度筛选阈值
-        self.min_length = 0.45  # 最小长度（米）
+        self.min_length = 0.39  # 最小长度（米）
         self.max_length = 0.60  # 最大长度（米）
         
         rospy.loginfo("ClusterVisualizer initialized, waiting for scan data...")
