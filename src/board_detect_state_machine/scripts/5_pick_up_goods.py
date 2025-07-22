@@ -195,8 +195,8 @@ class RobotStateMachine(object):
     # 初始化位置
     def init_locations(self):
         self.locations = {
-            'up_point': self.create_pose(1.25, 3.50, 0.7071, 0.7071),
-            'down_point': self.create_pose(1.25, 4.00, -0.7071, 0.7071)
+            'up_point': self.create_pose(1.25, 3.0, 0.7071, 0.7071),
+            'down_point': self.create_pose(1.25, 4.10, -0.7071, 0.7071)
         }
 
     # 创建目标位置的函数

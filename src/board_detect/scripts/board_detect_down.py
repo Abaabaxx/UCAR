@@ -50,7 +50,7 @@ class ClusterVisualizer:
         self.max_length = 0.6  # 最大长度（米）
         
         # 定义ROI多边形区域
-        self.polygon = Polygon([(-0.2, 4), (2.7, 4), (2.7, 1.7), (-0.2, 1.7)])
+        self.polygon = Polygon([(-0.2, 4.1), (2.7, 4.1), (2.7, 1.7), (-0.2, 1.7)])
         
         # 目标位姿参数
         self.target_distance = 0.50  # 前方目标距离（米）
