@@ -1,0 +1,30 @@
+<launch>
+    <!-- base.launch 提供基本的环境，但是不提供amcl 因为初始位姿不定 -->
+    
+    <!-- 底盘驱动 -->
+    <include file="$(find ucar_controller)/launch/base_driver_ekf.launch" />
+
+    <!-- 激光雷达驱动 -->
+    <include file="$(find ydlidar)/launch/ydlidar.launch" />
+
+    <!-- 加载地图服务 -->
+    <include file="$(find ucar_nav)/launch/ucar_map.launch" />
+
+    <!-- 加载机器人URDF模型描述 -->
+    <param name="robot_description" textfile="$(find ucar_nav)/urdf/xfcar.urdf" />
+
+
+    <!-- move_base导航节点配置 -->
+    <include file="$(find ucar_nav)/launch/move_base.launch" />
+    
+    <!-- 机器人状态发布 -->
+    <node pkg="joint_state_publisher" name="joint_state_publisher" type="joint_state_publisher" />
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" />
+        <!-- 备注: 当需要使用EKF时，取消下面的注释 -->
+        <!-- <remap from="/odom" to="/odom_ekf"/> -->
+
+
+    <!-- 启动RViz可视化工具 -->
+    <!-- <node pkg="rviz" type="rviz" name="rviz" args="-d $(find ucar_nav)/rviz/xwc.rviz" /> -->
+
+</launch>

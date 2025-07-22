@@ -18,8 +18,7 @@ sensor_timeout: 0.1
 two_d_mode: true
 
 # --- 坐标系定义 ---
-# EKF输出的里程计的世界坐标系。对于纯里程计融合，我们用 "odom"。
-map_frame: odom
+# map_frame, odom_frame, 和 base_link_frame 这三个参数的值必须是独一无二的，不能有任何重复。所以map_frame必须为 map 不可以为odom！！
 
 # EKF输出的里程计的自身坐标系。同样，设为 "odom"。
 # EKF节点本身不会发布 map->odom 的变换，这是AMCL的工作。
