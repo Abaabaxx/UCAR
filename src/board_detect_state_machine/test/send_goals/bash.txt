@@ -4,6 +4,8 @@ roslaunch /home/ucar/lby_ws/src/board_detect_state_machine/launch/base.launch
 # 1-上平面点
 rostopic pub -1 /move_base/goal move_base_msgs/MoveBaseActionGoal '{goal: {target_pose: {header: {frame_id: "map"}, pose: {position: {x: 1.25, y: 3.50, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.7071, w: 0.7071}}}}}'
 
+rostopic pub -1 /move_base/goal move_base_msgs/MoveBaseActionGoal '{goal: {target_pose: {header: {frame_id: "map"}, pose: {position: {x: 1.25, y: 3.0, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.7071, w: 0.7071}}}}}'
+
 # 2-角落
 rostopic pub -1 /move_base/goal move_base_msgs/MoveBaseActionGoal '{goal: {target_pose: {header: {frame_id: "map"}, pose: {position: {x: 0.75, y: 4.25, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.92388, w: 0.38268}}}}}'
 
