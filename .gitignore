@@ -46,3 +46,9 @@ datasets/
 src/board_detect/goals_up/
 src/board_detect/goals_down/
 src/ucar_controller/log_info
+src/darknet_ros/.github/
+src/darknet_ros/darknet/
+src/darknet_ros/darknet_ros_msgs/
+src/darknet_ros/.gitmodules
+src/darknet_ros/jenkins-pipeline
+src/darknet_ros/LICENSE
