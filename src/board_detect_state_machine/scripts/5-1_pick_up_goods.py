@@ -135,47 +135,67 @@ class RobotStateMachine(object):
             # 计算最小和最大允许面积（以像素为单位）
             min_area_pixels = self.IMAGE_WIDTH * self.IMAGE_HEIGHT * self.MIN_AREA_RATIO
             max_area_pixels = self.IMAGE_WIDTH * self.IMAGE_HEIGHT * self.MAX_AREA_RATIO
-                
+            
             for box in msg.bounding_boxes:
-                # 阶段一：条件化宽度过滤器
-                is_in_edge_zone = (box.xmin < self.CENTER_ZONE_MARGIN) or (box.xmax > (self.IMAGE_WIDTH - self.CENTER_ZONE_MARGIN))
+                rospy.loginfo("--- 开始分析检测框: %s (x1:%d, y1:%d, x2:%d, y2:%d) ---", 
+                            box.Class, box.xmin, box.ymin, box.xmax, box.ymax)
+
+                # --- 第一关：条件化宽度过滤器 ---
+                rospy.loginfo("  [第一关 - 位置检查] 区域定义: 中心区 >%d 且 <%d 像素.", 
+                            self.CENTER_ZONE_MARGIN, self.IMAGE_WIDTH - self.CENTER_ZONE_MARGIN)
+                
+                is_in_edge_zone = False
+                # 检查左边缘区
+                if box.xmin < self.CENTER_ZONE_MARGIN:
+                    is_in_edge_zone = True
+                    rospy.loginfo("    -> 物体位于左侧边缘区, 因为 xmin(%d) < %d.", 
+                                box.xmin, self.CENTER_ZONE_MARGIN)
+                # 检查右边缘区
+                if box.xmax > (self.IMAGE_WIDTH - self.CENTER_ZONE_MARGIN):
+                    is_in_edge_zone = True
+                    rospy.loginfo("    -> 物体位于右侧边缘区, 因为 xmax(%d) > %d.", 
+                                box.xmax, self.IMAGE_WIDTH - self.CENTER_ZONE_MARGIN)
+
                 if is_in_edge_zone:
                     box_width = box.xmax - box.xmin
+                    rospy.loginfo("    -> 检查边缘区宽度要求: %d >= %d?", 
+                                box_width, self.EDGE_ZONE_MIN_WIDTH)
                     if box_width < self.EDGE_ZONE_MIN_WIDTH:
-                        rospy.loginfo("拒绝 %s: 位于边缘区域且宽度(%d)小于阈值(%d)", box.Class, box_width, self.EDGE_ZONE_MIN_WIDTH)
+                        rospy.loginfo("  [拒绝] 宽度不满足边缘区要求.")
                         continue
-                
-                # 阶段二：面积过滤器
+                else:
+                    rospy.loginfo("  [第一关 - 位置检查] 物体位于中心区, 免除宽度检查.")
+
+                # --- 第二关：面积过滤器 ---
                 box_area = (box.xmax - box.xmin) * (box.ymax - box.ymin)
-                if box_area < min_area_pixels:
-                    rospy.loginfo("拒绝 %s: 面积(%d)过小，小于最小阈值(%d)", box.Class, box_area, min_area_pixels)
+                min_area_pixels = self.IMAGE_WIDTH * self.IMAGE_HEIGHT * self.MIN_AREA_RATIO
+                max_area_pixels = self.IMAGE_WIDTH * self.IMAGE_HEIGHT * self.MAX_AREA_RATIO
+                rospy.loginfo("  [第二关 - 面积检查] 检查面积: %d <= %d <= %d?", 
+                            int(min_area_pixels), box_area, int(max_area_pixels))
+                if not (min_area_pixels <= box_area <= max_area_pixels):
+                    rospy.loginfo("  [拒绝] 面积不在有效范围内.")
                     continue
-                
-                if box_area > max_area_pixels:
-                    rospy.loginfo("拒绝 %s: 面积(%d)过大，大于最大阈值(%d)", box.Class, box_area, max_area_pixels)
-                    continue
-                
-                # 阶段三：置信度过滤器
+
+                # --- 第三关：置信度过滤器 ---
+                rospy.loginfo("  [第三关 - 置信度检查] 检查置信度: %.2f >= %.2f?", 
+                            box.probability, self.yolo_confidence_threshold)
                 if box.probability < self.yolo_confidence_threshold:
-                    rospy.loginfo("拒绝 %s: 置信度(%.2f)低于阈值(%.2f)", box.Class, box.probability, self.yolo_confidence_threshold)
+                    rospy.loginfo("  [拒绝] 置信度过低.")
                     continue
-                
-                # 阶段四：类别过滤器
+
+                # --- 第四关：类别过滤器 ---
+                rospy.loginfo("  [第四关 - 类别检查] 检查类别: '%s' 是否在 %s 中?", 
+                            box.Class, target_goods)
                 if box.Class not in target_goods:
-                    rospy.loginfo("拒绝 %s: 不在目标货物列表中", box.Class)
+                    rospy.loginfo("  [拒绝] 类别不在目标列表中.")
                     continue
                 
-                # 最终接受
-                # 计算面积占比
-                total_image_area = self.IMAGE_WIDTH * self.IMAGE_HEIGHT
-                area_percentage = (float(box_area) / total_image_area) * 100.0
-                
-                rospy.loginfo("接受 %s: 置信度:%.2f, 面积:%d (%.1f%%)",
-                          box.Class, box.probability, box_area, area_percentage)
+                # --- 最终接受 ---
+                rospy.loginfo("  [成功] 所有检查通过, 已锁定目标!")
                 detection_result['found_item'] = box.Class
-                detection_event.set()  # 通知主线程已找到结果
+                detection_event.set()
                 return
-        
+
         # 订阅YOLO检测结果话题
         subscriber = rospy.Subscriber('/darknet_ros/bounding_boxes', 
                                     BoundingBoxes, 
