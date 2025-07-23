@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+
 # 命令行启动：rosservice call /go_board_detect "{}"
 
 import rospy
@@ -81,7 +82,7 @@ class RobotStateMachine(object):
             'desserts': ['milk', 'cake', 'cola'],
             'vegetables': ['pepper', 'potato', 'tomato']
         }
-        self.current_task = 'fruits'  # 默认任务
+        self.current_task = 'desserts'  # 默认任务
         self.yolo_confidence_threshold = 0.6 # YOLO识别的置信度阈值
         self.found_good_name = None   # 用于存储找到的货物名称
         
@@ -164,8 +165,15 @@ class RobotStateMachine(object):
                     continue
                 
                 # 5. 最终接受
-                rospy.loginfo("检测到目标货物: %s，置信度: %.2f，位置: [%d,%d,%d,%d]，面积: %d", 
-                            box.Class, box.probability, box.xmin, box.ymin, box.xmax, box.ymax, box_area)
+                # 计算边界安全距离 (距离触发过滤条件的最小像素数)
+                boundary_clearance = min(box.xmin - self.BOUNDARY_MARGIN, (self.IMAGE_WIDTH - self.BOUNDARY_MARGIN) - box.xmax)
+                
+                # 计算面积占比
+                total_image_area = self.IMAGE_WIDTH * self.IMAGE_HEIGHT
+                area_percentage = (float(box_area) / total_image_area) * 100.0
+                
+                rospy.loginfo("接受 %s: 置信度:%.2f, 面积:%d (%.1f%%), 边界安全距离:%dpx",
+                          box.Class, box.probability, box_area, area_percentage, boundary_clearance)
                 detection_result['found_item'] = box.Class
                 detection_event.set()  # 通知主线程已找到结果
                 return
