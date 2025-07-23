@@ -2,7 +2,7 @@
 stateDiagram-v2
     %% 模式: 常规
     %% AI模型: Gemini
-    %% 目的: 展示扩展后的状态机逻辑
+    %% 目的: 展示最终扩展完成后的状态机逻辑
 
     %% --- 状态定义 ---
     IDLE: 0-IDLE 空闲
@@ -14,7 +14,8 @@ stateDiagram-v2
     SPEAK_GOODS: 6-播报找到的货物
     NAV_TO_SIMULATION: 7-导航至仿真区
     DO_SIMULATION_TASKS: 8-执行仿真任务
-    SPEAK_SIMULATION_ROOM: 9-播报仿真房间
+    SPEAK_ROOM: 9-播报仿真房间
+    NAV_TO_TRAFFIC: 10-导航至红绿灯区
     ERROR: 99-错误状态
 
     %% --- 流程开始 ---
@@ -34,28 +35,25 @@ stateDiagram-v2
     PICK_UP_GOODS --> ERROR: Event.PATROL_SEQUENCE_COMPLETED
     SPEAK_GOODS --> NAV_TO_SIMULATION: Event.SPEAK_DONE
     SPEAK_GOODS --> ERROR: Event.SPEAK_TIMEOUT
-
-    %% --- 核心修改：扩展最终流程 ---
     NAV_TO_SIMULATION --> DO_SIMULATION_TASKS: Event.NAV_DONE_SUCCESS
     NAV_TO_SIMULATION --> ERROR: Event.NAV_DONE_FAILURE
-
-    %% --- 新增的仿真到停留流程 ---
-    DO_SIMULATION_TASKS --> SPEAK_SIMULATION_GOODS: Event.SIMULATION_DONE
+    DO_SIMULATION_TASKS --> SPEAK_ROOM: Event.SIMULATION_DONE
+    SPEAK_ROOM --> NAV_TO_TRAFFIC: Event.SPEAK_DONE
 
     %% --- 流程终点 ---
     ERROR --> [*]
 
 
 
-    note right of DO_SIMULATION_TASKS
-        **核心修改:**
-        1. 核心动作: 启动一个3秒的定时器模拟任务。
-        2. 定时器结束后，触发 Event.SIMULATION_DONE 事件。
+    note right of SPEAK_ROOM
+        **核心动作:**
+        1. 启动3秒定时器模拟播报。
+        2. 定时器结束 -> 触发 Event.SPEAK_DONE。
     end note
 
-    note right of SPEAK_SIMULATION_GOODS
-        **新增的最终停留状态:**
+    note right of NAV_TO_TRAFFIC
+        **最终停留状态:**
         1. 核心动作: 无，仅打印日志。
-        2. 状态机将停留在此状态，不响应任何事件。
+        2. 状态机将停留在此。
     end note
 ```
