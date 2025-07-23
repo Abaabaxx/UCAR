@@ -47,6 +47,8 @@ class RobotStateMachine(object):
     1. 修改self.current_task可以改变机器人当前的任务类型（'fruits', 'desserts', 'vegetables'）
     2. 修改self.yolo_confidence_threshold可以调整YOLO检测的最低置信度阈值
     3. self.goods_categories字典定义了每种任务下的目标货物名称列表
+    4. 修改self.BOUNDARY_MARGIN调整边界过滤的严格程度
+    5. 修改self.MIN_AREA_RATIO和self.MAX_AREA_RATIO调整有效物体的大小范围
     """
     
     def __init__(self):
@@ -82,6 +84,13 @@ class RobotStateMachine(object):
         self.current_task = 'fruits'  # 默认任务
         self.yolo_confidence_threshold = 0.6 # YOLO识别的置信度阈值
         self.found_good_name = None   # 用于存储找到的货物名称
+        
+        # 图像和过滤器参数
+        self.IMAGE_WIDTH = 640
+        self.IMAGE_HEIGHT = 480
+        self.BOUNDARY_MARGIN = 15      # 边界过滤器的像素边距
+        self.MIN_AREA_RATIO = 0.05     # 最小面积占图像百分比
+        self.MAX_AREA_RATIO = 0.80     # 最大面积占图像百分比
 
     # 新增：检查目标货物方法
    # 修正后的 check_for_target_goods 方法
@@ -109,7 +118,7 @@ class RobotStateMachine(object):
                     ', '.join(target_goods), self.yolo_confidence_threshold)
         
         # 使用Python原生的threading.Event进行同步
-        detection_event = threading.Event()  # <--- 这是关键的修正点
+        detection_event = threading.Event()
         
         # 使用一个列表（或任何可变对象）来在线程间传递结果
         detection_result = {'found_item': None}
@@ -119,19 +128,47 @@ class RobotStateMachine(object):
             # 如果事件已经设置，说明已经找到目标，直接返回避免重复处理
             if detection_event.is_set():
                 return
+            
+            # 计算最小和最大允许面积（以像素为单位）
+            min_area_pixels = self.IMAGE_WIDTH * self.IMAGE_HEIGHT * self.MIN_AREA_RATIO
+            max_area_pixels = self.IMAGE_WIDTH * self.IMAGE_HEIGHT * self.MAX_AREA_RATIO
                 
             for box in msg.bounding_boxes:
-                # 首先检查置信度是否达到阈值
-                if box.probability < self.yolo_confidence_threshold:
+                # 1. 边界过滤器检查
+                if box.xmin <= self.BOUNDARY_MARGIN:
+                    rospy.loginfo("拒绝 %s: xmin(%d) 小于边界 %d", box.Class, box.xmin, self.BOUNDARY_MARGIN)
                     continue
-                    
-                # 再检查物品类别是否在目标列表中
-                if box.Class in target_goods:
-                    rospy.loginfo("检测到目标货物: %s，置信度: %.2f", 
-                                box.Class, box.probability)
-                    detection_result['found_item'] = box.Class
-                    detection_event.set()  # 通知主线程已找到结果
-                    return
+                
+                if box.xmax >= (self.IMAGE_WIDTH - self.BOUNDARY_MARGIN):
+                    rospy.loginfo("拒绝 %s: xmax(%d) 大于边界 %d", box.Class, box.xmax, (self.IMAGE_WIDTH - self.BOUNDARY_MARGIN))
+                    continue
+                
+                # 2. 尺寸过滤器检查
+                box_area = (box.xmax - box.xmin) * (box.ymax - box.ymin)
+                if box_area < min_area_pixels:
+                    rospy.loginfo("拒绝 %s: 面积(%d)过小，小于最小阈值(%d)", box.Class, box_area, min_area_pixels)
+                    continue
+                
+                if box_area > max_area_pixels:
+                    rospy.loginfo("拒绝 %s: 面积(%d)过大，大于最大阈值(%d)", box.Class, box_area, max_area_pixels)
+                    continue
+                
+                # 3. 置信度检查
+                if box.probability < self.yolo_confidence_threshold:
+                    rospy.loginfo("拒绝 %s: 置信度(%.2f)低于阈值(%.2f)", box.Class, box.probability, self.yolo_confidence_threshold)
+                    continue
+                
+                # 4. 类别检查
+                if box.Class not in target_goods:
+                    rospy.loginfo("拒绝 %s: 不在目标货物列表中", box.Class)
+                    continue
+                
+                # 5. 最终接受
+                rospy.loginfo("检测到目标货物: %s，置信度: %.2f，位置: [%d,%d,%d,%d]，面积: %d", 
+                            box.Class, box.probability, box.xmin, box.ymin, box.xmax, box.ymax, box_area)
+                detection_result['found_item'] = box.Class
+                detection_event.set()  # 通知主线程已找到结果
+                return
         
         # 订阅YOLO检测结果话题
         subscriber = rospy.Subscriber('/darknet_ros/bounding_boxes', 
