@@ -126,11 +126,20 @@ class RobotStateMachine(object):
         # 使用一个列表（或任何可变对象）来在线程间传递结果
         detection_result = {'found_item': None}
         
+        # 用于日志节流的时间戳管理器
+        log_throttle_manager = {'last_log_time': 0.0}
+        
         # 回调函数，处理收到的边界框信息
         def bounding_boxes_callback(msg):
             # 如果事件已经设置，说明已经找到目标，直接返回避免重复处理
             if detection_event.is_set():
                 return
+            
+            # 新增：日志节流阀
+            current_time = rospy.get_time()
+            if (current_time - log_throttle_manager['last_log_time']) < 3.0:
+                return # 距离上次打印不足3秒，直接忽略此帧
+            log_throttle_manager['last_log_time'] = current_time
             
             # 计算最小和最大允许面积（以像素为单位）
             min_area_pixels = self.IMAGE_WIDTH * self.IMAGE_HEIGHT * self.MIN_AREA_RATIO
