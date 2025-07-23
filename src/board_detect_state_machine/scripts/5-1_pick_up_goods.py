@@ -48,8 +48,9 @@ class RobotStateMachine(object):
     1. 修改self.current_task可以改变机器人当前的任务类型（'fruits', 'desserts', 'vegetables'）
     2. 修改self.yolo_confidence_threshold可以调整YOLO检测的最低置信度阈值
     3. self.goods_categories字典定义了每种任务下的目标货物名称列表
-    4. 修改self.BOUNDARY_MARGIN调整边界过滤的严格程度
-    5. 修改self.MIN_AREA_RATIO和self.MAX_AREA_RATIO调整有效物体的大小范围
+    4. 修改self.CENTER_ZONE_MARGIN定义中心安全区的范围
+    5. 修改self.EDGE_ZONE_MIN_WIDTH调整对边缘物体的宽度要求
+    6. 修改self.MIN_AREA_RATIO和self.MAX_AREA_RATIO调整有效物体的大小范围
     """
     
     def __init__(self):
@@ -82,14 +83,15 @@ class RobotStateMachine(object):
             'desserts': ['milk', 'cake', 'cola'],
             'vegetables': ['pepper', 'potato', 'tomato']
         }
-        self.current_task = 'desserts'  # 默认任务
+        self.current_task = 'fruits'  # 默认任务
         self.yolo_confidence_threshold = 0.6 # YOLO识别的置信度阈值
         self.found_good_name = None   # 用于存储找到的货物名称
         
         # 图像和过滤器参数
         self.IMAGE_WIDTH = 640
         self.IMAGE_HEIGHT = 480
-        self.BOUNDARY_MARGIN = 15      # 边界过滤器的像素边距
+        self.CENTER_ZONE_MARGIN = 30  # 中心安全区的边界 (从图像边缘向内)
+        self.EDGE_ZONE_MIN_WIDTH = 200 # 边缘区域物体的最小宽度要求
         self.MIN_AREA_RATIO = 0.05     # 最小面积占图像百分比
         self.MAX_AREA_RATIO = 0.80     # 最大面积占图像百分比
 
@@ -135,16 +137,15 @@ class RobotStateMachine(object):
             max_area_pixels = self.IMAGE_WIDTH * self.IMAGE_HEIGHT * self.MAX_AREA_RATIO
                 
             for box in msg.bounding_boxes:
-                # 1. 边界过滤器检查
-                if box.xmin <= self.BOUNDARY_MARGIN:
-                    rospy.loginfo("拒绝 %s: xmin(%d) 小于边界 %d", box.Class, box.xmin, self.BOUNDARY_MARGIN)
-                    continue
+                # 阶段一：条件化宽度过滤器
+                is_in_edge_zone = (box.xmin < self.CENTER_ZONE_MARGIN) or (box.xmax > (self.IMAGE_WIDTH - self.CENTER_ZONE_MARGIN))
+                if is_in_edge_zone:
+                    box_width = box.xmax - box.xmin
+                    if box_width < self.EDGE_ZONE_MIN_WIDTH:
+                        rospy.loginfo("拒绝 %s: 位于边缘区域且宽度(%d)小于阈值(%d)", box.Class, box_width, self.EDGE_ZONE_MIN_WIDTH)
+                        continue
                 
-                if box.xmax >= (self.IMAGE_WIDTH - self.BOUNDARY_MARGIN):
-                    rospy.loginfo("拒绝 %s: xmax(%d) 大于边界 %d", box.Class, box.xmax, (self.IMAGE_WIDTH - self.BOUNDARY_MARGIN))
-                    continue
-                
-                # 2. 尺寸过滤器检查
+                # 阶段二：面积过滤器
                 box_area = (box.xmax - box.xmin) * (box.ymax - box.ymin)
                 if box_area < min_area_pixels:
                     rospy.loginfo("拒绝 %s: 面积(%d)过小，小于最小阈值(%d)", box.Class, box_area, min_area_pixels)
@@ -154,26 +155,23 @@ class RobotStateMachine(object):
                     rospy.loginfo("拒绝 %s: 面积(%d)过大，大于最大阈值(%d)", box.Class, box_area, max_area_pixels)
                     continue
                 
-                # 3. 置信度检查
+                # 阶段三：置信度过滤器
                 if box.probability < self.yolo_confidence_threshold:
                     rospy.loginfo("拒绝 %s: 置信度(%.2f)低于阈值(%.2f)", box.Class, box.probability, self.yolo_confidence_threshold)
                     continue
                 
-                # 4. 类别检查
+                # 阶段四：类别过滤器
                 if box.Class not in target_goods:
                     rospy.loginfo("拒绝 %s: 不在目标货物列表中", box.Class)
                     continue
                 
-                # 5. 最终接受
-                # 计算边界安全距离 (距离触发过滤条件的最小像素数)
-                boundary_clearance = min(box.xmin - self.BOUNDARY_MARGIN, (self.IMAGE_WIDTH - self.BOUNDARY_MARGIN) - box.xmax)
-                
+                # 最终接受
                 # 计算面积占比
                 total_image_area = self.IMAGE_WIDTH * self.IMAGE_HEIGHT
                 area_percentage = (float(box_area) / total_image_area) * 100.0
                 
-                rospy.loginfo("接受 %s: 置信度:%.2f, 面积:%d (%.1f%%), 边界安全距离:%dpx",
-                          box.Class, box.probability, box_area, area_percentage, boundary_clearance)
+                rospy.loginfo("接受 %s: 置信度:%.2f, 面积:%d (%.1f%%)",
+                          box.Class, box.probability, box_area, area_percentage)
                 detection_result['found_item'] = box.Class
                 detection_event.set()  # 通知主线程已找到结果
                 return
