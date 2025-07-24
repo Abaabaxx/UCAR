@@ -2,26 +2,33 @@
 # -*- coding: utf-8 -*-
 
 """
-统一状态机节点 - 合并前半段（二维码识别与任务获取）和后半段（板子检测与货物拣选）
-整合自：
-- 6_nav_to_picking.py（前半段：状态0-6）
-- 19_nav_to_line.py（后半段：状态7-25）
+统一状态机节点（完整版）
 
-使用方法：
-1. 启动状态机：
-   方式1 - 服务调用：rosservice call /start_state_machine "{}"
-   方式2 - 语音唤醒：通过语音唤醒
-2. 重置状态机：
-   rosservice call /reset_state_machine "{}"
+功能描述:
+这是一个为ROS机器人比赛设计的、包含完整任务流程的统一状态机。
+它将任务的全过程，从启动、接收任务到最终完成，整合在一个单一的逻辑流中。
 
-开发者测试说明：
-可通过修改setup()方法中的self.current_state初始值来从任意状态启动测试
+核心流程包括：
+1.  **任务获取**: 启动后，通过导航和旋转识别二维码，获取指定任务类型（如水果、甜点等）。
+2.  **节点生命周期管理**: 在获取任务后，会显式关闭二维码识别节点(/qr_detect)以释放资源。
+3.  **货物巡检与识别**: 导航至指定区域，通过多点巡航和YOLOv4进行目标货物识别。
+4.  **仿真任务与红绿灯处理**: 在取货后，执行仿真任务并处理复杂的红绿灯路口逻辑。
+5.  **任务收尾**: 在完成红绿灯导航后，会显式关闭YOLO节点(/darknet_ros)，并进入最终的巡线状态。
 
-作者：基于原始脚本合并
-创建时间：2025-01-XX
+使用方法:
+1.  启动状态机:
+    方式1 (服务调用): rosservice call /start_state_machine "{}"
+    方式2 (语音唤醒): 通过语音“小车小车”唤醒
+2.  重置状态机:
+    rosservice call /reset_state_machine "{}"
+
+开发者测试说明:
+可通过修改 UnifiedStateMachine.setup() 方法中的 self.current_state 初始值，
+来从任意指定的状态启动测试，方便调试。
 """
 
 import rospy
+import rosnode
 import actionlib
 from std_msgs.msg import String
 from std_msgs.msg import Int32
@@ -52,20 +59,25 @@ class Event(object):
     START_CMD = 0
     NAV_DONE_SUCCESS = 1
     NAV_DONE_FAILURE = 2
-    SPEAK_DONE = 5           # 统一的语音播放完成事件
-    SPEAK_TIMEOUT = 6        # 统一的语音播放超时事件
     # --- 前半段特定事件 ---
-    QR_RESULT_VALID = 3     
-    PERCEPTION_TIMEOUT = 4   
-    # --- 后半段特定事件 ---
-    SEARCH_DONE_SUCCESS = 7
-    SEARCH_DONE_FAILURE = 8
-    GOODS_FOUND = 9
-    PATROL_SEQUENCE_COMPLETED = 10
-    SIMULATION_DONE = 11
-    LIGHT_DETECTED_GREEN = 12
-    LIGHT_DETECTED_RED = 13
-    LIGHT_DETECT_TIMEOUT = 14
+    QR_RESULT_VALID = 3
+    PERCEPTION_TIMEOUT = 4
+    QR_NODE_SHUTDOWN_COMPLETE = 5
+    QR_NODE_SHUTDOWN_TIMEOUT = 6
+    # --- 通用事件 (重新编号) ---
+    SPEAK_DONE = 7
+    SPEAK_TIMEOUT = 8
+    # --- 后半段特定事件 (重新编号) ---
+    SEARCH_DONE_SUCCESS = 9
+    SEARCH_DONE_FAILURE = 10
+    GOODS_FOUND = 11
+    PATROL_SEQUENCE_COMPLETED = 12
+    SIMULATION_DONE = 13
+    LIGHT_DETECTED_GREEN = 14
+    LIGHT_DETECTED_RED = 15
+    LIGHT_DETECT_TIMEOUT = 16
+    YOLO_SHUTDOWN_COMPLETE = 17
+    YOLO_SHUTDOWN_TIMEOUT = 18
 
 # 统一状态类定义
 class RobotState(object):
@@ -74,29 +86,31 @@ class RobotState(object):
     NAVIGATE_TO_QR1 = 1
     ROTATE_TO_QR2 = 2
     NAVIGATE_TO_QR_AREA = 3
-    WAIT_FOR_QR_RESULT = 4 
-    SPEAK_TASK_TYPE = 5    
-    NAV_TO_PICK_PREP_AREA = 6  # 关键桥梁状态
+    WAIT_FOR_QR_RESULT = 4
+    SHUTDOWN_QR_NODE = 5
+    SPEAK_TASK_TYPE = 6
+    NAV_TO_PICK_PREP_AREA = 7
     # --- 后半段状态 ---
-    NAVIGATE_TO_UP_POINT = 7
-    SEARCH_UP_BOARD = 8
-    NAVIGATE_TO_DOWN_POINT = 9
-    SEARCH_DOWN_BOARD = 10
-    PICK_UP_GOODS = 11
-    SPEAK_GOODS = 12
-    NAV_TO_SIMULATION = 13
-    DO_SIMULATION_TASKS = 14
-    SPEAK_ROOM = 15
-    NAV_TO_TRAFFIC = 16
-    NAV_TO_LANE1_OBSERVE_POINT = 17
-    DETECTING_LANE1_LIGHT = 18
-    SPEAK_LANE1_CLEAR = 19
-    NAV_TO_LANE1_WAITING_POINT = 20
-    NAV_TO_LANE2_OBSERVE_POINT = 21
-    DETECTING_LANE2_LIGHT = 22
-    SPEAK_LANE2_CLEAR = 23
-    NAV_TO_LANE2_WAITING_POINT = 24
-    FINAL_HOLD = 25
+    NAVIGATE_TO_UP_POINT = 8
+    SEARCH_UP_BOARD = 9
+    NAVIGATE_TO_DOWN_POINT = 10
+    SEARCH_DOWN_BOARD = 11
+    PICK_UP_GOODS = 12
+    SPEAK_GOODS = 13
+    NAV_TO_SIMULATION = 14
+    DO_SIMULATION_TASKS = 15
+    SPEAK_ROOM = 16
+    NAV_TO_TRAFFIC = 17
+    NAV_TO_LANE1_OBSERVE_POINT = 18
+    DETECTING_LANE1_LIGHT = 19
+    SPEAK_LANE1_CLEAR = 20
+    NAV_TO_LANE1_WAITING_POINT = 21
+    NAV_TO_LANE2_OBSERVE_POINT = 22
+    DETECTING_LANE2_LIGHT = 23
+    SPEAK_LANE2_CLEAR = 24
+    NAV_TO_LANE2_WAITING_POINT = 25
+    SHUTDOWN_YOLO_NODE = 26
+    LINE_FOLLOWING = 27
     # --- 系统状态 ---
     ERROR = 99
 
@@ -140,6 +154,14 @@ class UnifiedStateMachine(object):
         self.speak_timeout = 10.0  # 语音播放超时时间(秒)
         self.current_voice_cmd = None  # 当前播放的语音命令
         self.voice_service_called = False  # 标记语音服务是否已调用
+        
+        # 节点关闭相关变量
+        self.shutdown_check_timer = None
+        self.shutdown_timeout_timer = None
+        self.qr_shutdown_timeout_duration = 5.0
+        self.yolo_shutdown_check_timer = None
+        self.yolo_shutdown_timeout_timer = None
+        self.yolo_shutdown_timeout_duration = 5.0
         
         # 后半段变量
         self.locations = {}
@@ -297,9 +319,35 @@ class UnifiedStateMachine(object):
             self.task_processed = False
             self.start_perception_timer()
             
+        # 关闭QR节点状态
+        elif self.current_state == RobotState.SHUTDOWN_QR_NODE:
+            rospy.loginfo("5-关闭QR节点")
+            
+            # 执行rosnode kill命令关闭QR节点
+            try:
+                # 使用subprocess执行rosnode kill命令
+                subprocess.Popen(["rosnode", "kill", "/qr_detect"])
+                rospy.loginfo("已发送关闭QR节点命令")
+                
+                # 启动定时检查节点是否已关闭
+                self.shutdown_check_timer = rospy.Timer(
+                    rospy.Duration(0.5),
+                    self._check_qr_node_shutdown_status
+                )
+                
+                # 启动超时定时器
+                self.shutdown_timeout_timer = rospy.Timer(
+                    rospy.Duration(self.qr_shutdown_timeout_duration),
+                    self._handle_qr_node_shutdown_timeout,
+                    oneshot=True
+                )
+            except Exception as e:
+                rospy.logerr("关闭QR节点时出错: %s", str(e))
+                self.handle_event(Event.QR_NODE_SHUTDOWN_TIMEOUT)
+            
         # 播报任务类型状态
         elif self.current_state == RobotState.SPEAK_TASK_TYPE:
-            rospy.loginfo("5-播报任务类型: %s", self.task_type)
+            rospy.loginfo("6-播报任务类型: %s", self.task_type)
             
             # 根据任务类型选择播报内容
             if self.task_type == TaskType.FRUITS:
@@ -324,37 +372,37 @@ class UnifiedStateMachine(object):
             
         # 导航至拣货准备区状态（桥梁状态）
         elif self.current_state == RobotState.NAV_TO_PICK_PREP_AREA:
-            rospy.loginfo("6-导航至拣货准备区（桥梁状态）")
+            rospy.loginfo("7-导航至拣货准备区（桥梁状态）")
             self.send_nav_goal('pick_prep_area')
             self.navigation_active = True
             
         # --- 后半段状态动作 ---
         elif self.current_state == RobotState.NAVIGATE_TO_UP_POINT:
-            rospy.loginfo("7-开始导航至上平面位置...")
+            rospy.loginfo("8-开始导航至上平面位置...")
             self.send_nav_goal('up_point')
             self.navigation_active = True
             
         elif self.current_state == RobotState.SEARCH_UP_BOARD:
-            rospy.loginfo("8-搜索上平面板子")
+            rospy.loginfo("9-搜索上平面板子")
             self.start_board_detection()
             
         elif self.current_state == RobotState.NAVIGATE_TO_DOWN_POINT:
-            rospy.loginfo("9-开始导航至下平面位置...")
+            rospy.loginfo("10-开始导航至下平面位置...")
             self.send_nav_goal('down_point')
             self.navigation_active = True
             
         elif self.current_state == RobotState.SEARCH_DOWN_BOARD:
-            rospy.loginfo("10-搜索下平面板子")
+            rospy.loginfo("11-搜索下平面板子")
             self.start_down_board_detection()
             
         elif self.current_state == RobotState.PICK_UP_GOODS:
-            rospy.loginfo("11-开始执行多点巡检...")
+            rospy.loginfo("12-开始执行多点巡检...")
             self.execute_patrol_sequence()
             
         elif self.current_state == RobotState.SPEAK_GOODS:
             if self.found_good_name:
                 self.current_voice_cmd = "get_" + self.found_good_name
-                rospy.loginfo("12-状态[SPEAK_GOODS]: 准备播报找到的货物: %s", self.current_voice_cmd)
+                rospy.loginfo("13-状态[SPEAK_GOODS]: 准备播报找到的货物: %s", self.current_voice_cmd)
                 self.voice_service_called = False
                 self.call_voice_service()
             else:
@@ -362,64 +410,89 @@ class UnifiedStateMachine(object):
                 self.handle_event(Event.SPEAK_TIMEOUT)
                 
         elif self.current_state == RobotState.NAV_TO_SIMULATION:
-            rospy.loginfo("13-开始导航至最终目标点：仿真区...")
+            rospy.loginfo("14-开始导航至最终目标点：仿真区...")
             self.send_nav_goal('simulation_area')
             self.navigation_active = True
             
         elif self.current_state == RobotState.DO_SIMULATION_TASKS:
-            rospy.loginfo("14-开始执行3秒仿真任务...")
+            rospy.loginfo("15-开始执行3秒仿真任务...")
             rospy.Timer(rospy.Duration(3.0), self._simulation_timer_callback, oneshot=True)
             
         elif self.current_state == RobotState.SPEAK_ROOM:
-            rospy.loginfo("15-进入房间播报状态，开始模拟播报，持续3秒...")
+            rospy.loginfo("16-进入房间播报状态，开始模拟播报，持续3秒...")
             rospy.Timer(rospy.Duration(3.0), self._speak_room_timer_callback, oneshot=True)
             
         elif self.current_state == RobotState.NAV_TO_TRAFFIC:
-            rospy.loginfo("16-进入红绿灯区域状态，准备导航至第一车道观察点...")
+            rospy.loginfo("17-进入红绿灯区域状态，准备导航至第一车道观察点...")
             rospy.Timer(rospy.Duration(0.5), self._traffic_timer_callback, oneshot=True)
             
         elif self.current_state == RobotState.NAV_TO_LANE1_OBSERVE_POINT:
-            rospy.loginfo("17-开始导航至第一车道观察点...")
+            rospy.loginfo("18-开始导航至第一车道观察点...")
             self.send_nav_goal('lane1_observe_point')
             self.navigation_active = True
 
         elif self.current_state == RobotState.DETECTING_LANE1_LIGHT:
-            rospy.loginfo("18-开始检测第一车道红绿灯...")
+            rospy.loginfo("19-开始检测第一车道红绿灯...")
             self.start_light_detection()
             
         elif self.current_state == RobotState.SPEAK_LANE1_CLEAR:
-            rospy.loginfo("19-第一车道绿灯，准备播报通行信息...")
+            rospy.loginfo("20-第一车道绿灯，准备播报通行信息...")
             self.current_voice_cmd = "way_1"
             self.voice_service_called = False
             self.call_voice_service()
             
         elif self.current_state == RobotState.NAV_TO_LANE1_WAITING_POINT:
-            rospy.loginfo("20-开始导航至第一车道等待点...")
+            rospy.loginfo("21-开始导航至第一车道等待点...")
             self.send_nav_goal('lane1_waiting_point')
             self.navigation_active = True
             
         elif self.current_state == RobotState.NAV_TO_LANE2_OBSERVE_POINT:
-            rospy.loginfo("21-开始导航至第二车道观察点...")
+            rospy.loginfo("22-开始导航至第二车道观察点...")
             self.send_nav_goal('lane2_observe_point')
             self.navigation_active = True
             
         elif self.current_state == RobotState.DETECTING_LANE2_LIGHT:
-            rospy.loginfo("22-开始检测第二车道红绿灯...")
+            rospy.loginfo("23-开始检测第二车道红绿灯...")
             self.start_light_detection()
             
         elif self.current_state == RobotState.SPEAK_LANE2_CLEAR:
-            rospy.loginfo("23-第二车道绿灯，准备播报通行信息...")
+            rospy.loginfo("24-第二车道绿灯，准备播报通行信息...")
             self.current_voice_cmd = "way_2"
             self.voice_service_called = False
             self.call_voice_service()
             
         elif self.current_state == RobotState.NAV_TO_LANE2_WAITING_POINT:
-            rospy.loginfo("24-开始导航至第二车道等待点...")
+            rospy.loginfo("25-开始导航至第二车道等待点...")
             self.send_nav_goal('lane2_waiting_point')
             self.navigation_active = True
             
-        elif self.current_state == RobotState.FINAL_HOLD:
-            rospy.loginfo("25-到达最终等待区，任务结束。")
+        elif self.current_state == RobotState.SHUTDOWN_YOLO_NODE:
+            rospy.loginfo("26-关闭YOLO节点")
+            
+            # 执行rosnode kill命令关闭YOLO节点
+            try:
+                # 使用subprocess执行rosnode kill命令
+                subprocess.Popen(["rosnode", "kill", "/darknet_ros"])
+                rospy.loginfo("已发送关闭YOLO节点命令")
+                
+                # 启动定时检查节点是否已关闭
+                self.yolo_shutdown_check_timer = rospy.Timer(
+                    rospy.Duration(0.5),
+                    self._check_yolo_node_shutdown_status
+                )
+                
+                # 启动超时定时器
+                self.yolo_shutdown_timeout_timer = rospy.Timer(
+                    rospy.Duration(self.yolo_shutdown_timeout_duration),
+                    self._handle_yolo_node_shutdown_timeout,
+                    oneshot=True
+                )
+            except Exception as e:
+                rospy.logerr("关闭YOLO节点时出错: %s", str(e))
+                self.handle_event(Event.YOLO_SHUTDOWN_TIMEOUT)
+            
+        elif self.current_state == RobotState.LINE_FOLLOWING:
+            rospy.loginfo("27-进入最终巡线状态，任务完成。")
             pass
             
         elif self.current_state == RobotState.ERROR:
@@ -460,9 +533,17 @@ class UnifiedStateMachine(object):
                 self.stop_perception_timer()
                 rospy.loginfo("收到有效的二维码结果，任务类型: %s", self.task_type)
                 self.publish_task_type()
-                self.transition(RobotState.SPEAK_TASK_TYPE)
+                self.transition(RobotState.SHUTDOWN_QR_NODE)
             elif event == Event.PERCEPTION_TIMEOUT:
                 rospy.logerr("二维码识别超时")
+                self.transition(RobotState.ERROR)
+                
+        elif self.current_state == RobotState.SHUTDOWN_QR_NODE:
+            if event == Event.QR_NODE_SHUTDOWN_COMPLETE:
+                rospy.loginfo("QR节点已成功关闭，准备播报任务类型")
+                self.transition(RobotState.SPEAK_TASK_TYPE)
+            elif event == Event.QR_NODE_SHUTDOWN_TIMEOUT:
+                rospy.logerr("QR节点关闭超时")
                 self.transition(RobotState.ERROR)
                 
         elif self.current_state == RobotState.SPEAK_TASK_TYPE:
@@ -558,7 +639,7 @@ class UnifiedStateMachine(object):
                 
         elif self.current_state == RobotState.NAV_TO_LANE1_WAITING_POINT:
             if event == Event.NAV_DONE_SUCCESS:
-                self.transition(RobotState.FINAL_HOLD)
+                self.transition(RobotState.SHUTDOWN_YOLO_NODE)
             elif event == Event.NAV_DONE_FAILURE:
                 self.transition(RobotState.ERROR)
                 
@@ -582,8 +663,16 @@ class UnifiedStateMachine(object):
                 
         elif self.current_state == RobotState.NAV_TO_LANE2_WAITING_POINT:
             if event == Event.NAV_DONE_SUCCESS:
-                self.transition(RobotState.FINAL_HOLD)
+                self.transition(RobotState.SHUTDOWN_YOLO_NODE)
             elif event == Event.NAV_DONE_FAILURE:
+                self.transition(RobotState.ERROR)
+
+        elif self.current_state == RobotState.SHUTDOWN_YOLO_NODE:
+            if event == Event.YOLO_SHUTDOWN_COMPLETE:
+                rospy.loginfo("YOLO节点已成功关闭，进入最终巡线状态")
+                self.transition(RobotState.LINE_FOLLOWING)
+            elif event == Event.YOLO_SHUTDOWN_TIMEOUT:
+                rospy.logerr("YOLO节点关闭超时")
                 self.transition(RobotState.ERROR)
 
     #*********************** 回调函数 ***********************#
@@ -1116,6 +1205,82 @@ class UnifiedStateMachine(object):
         rospy.logwarn("语音播放超时")
         if self.current_state == RobotState.SPEAK_TASK_TYPE or self.current_state == RobotState.SPEAK_GOODS:
             self.handle_event(Event.SPEAK_TIMEOUT)
+            
+    #*********************** 节点关闭相关功能 ***********************#
+    
+    # 检查QR节点关闭状态
+    def _check_qr_node_shutdown_status(self, event):
+        """检查QR节点是否已经关闭"""
+        # 获取当前所有节点列表
+        node_list = rosnode.get_node_names()
+        
+        # 检查QR节点是否还在运行
+        if '/qr_detect' not in node_list:
+            rospy.loginfo("QR节点已成功关闭")
+            
+            # 停止所有定时器
+            if self.shutdown_check_timer:
+                self.shutdown_check_timer.shutdown()
+                self.shutdown_check_timer = None
+                
+            if self.shutdown_timeout_timer:
+                self.shutdown_timeout_timer.shutdown()
+                self.shutdown_timeout_timer = None
+                
+            # 触发节点关闭完成事件
+            self.handle_event(Event.QR_NODE_SHUTDOWN_COMPLETE)
+        else:
+            rospy.loginfo("QR节点仍在运行，继续等待...")
+    
+    # 处理QR节点关闭超时
+    def _handle_qr_node_shutdown_timeout(self, event):
+        """处理QR节点关闭超时事件"""
+        rospy.logerr("QR节点关闭超时")
+        
+        # 停止检查定时器
+        if self.shutdown_check_timer:
+            self.shutdown_check_timer.shutdown()
+            self.shutdown_check_timer = None
+            
+        # 触发节点关闭超时事件
+        self.handle_event(Event.QR_NODE_SHUTDOWN_TIMEOUT)
+    
+    # 检查YOLO节点关闭状态
+    def _check_yolo_node_shutdown_status(self, event):
+        """检查YOLO节点是否已经关闭"""
+        # 获取当前所有节点列表
+        node_list = rosnode.get_node_names()
+        
+        # 检查YOLO节点是否还在运行
+        if '/darknet_ros' not in node_list:
+            rospy.loginfo("YOLO节点已成功关闭")
+            
+            # 停止所有定时器
+            if self.yolo_shutdown_check_timer:
+                self.yolo_shutdown_check_timer.shutdown()
+                self.yolo_shutdown_check_timer = None
+                
+            if self.yolo_shutdown_timeout_timer:
+                self.yolo_shutdown_timeout_timer.shutdown()
+                self.yolo_shutdown_timeout_timer = None
+                
+            # 触发节点关闭完成事件
+            self.handle_event(Event.YOLO_SHUTDOWN_COMPLETE)
+        else:
+            rospy.loginfo("YOLO节点仍在运行，继续等待...")
+    
+    # 处理YOLO节点关闭超时
+    def _handle_yolo_node_shutdown_timeout(self, event):
+        """处理YOLO节点关闭超时事件"""
+        rospy.logerr("YOLO节点关闭超时")
+        
+        # 停止检查定时器
+        if self.yolo_shutdown_check_timer:
+            self.yolo_shutdown_check_timer.shutdown()
+            self.yolo_shutdown_check_timer = None
+            
+        # 触发节点关闭超时事件
+        self.handle_event(Event.YOLO_SHUTDOWN_TIMEOUT)
 
     #*********************** 后半段特有定时器回调 ***********************#
     
@@ -1214,6 +1379,23 @@ class UnifiedStateMachine(object):
         
         # 停止红绿灯检测相关活动
         self.stop_light_detection_activities()
+        
+        # 停止节点关闭相关定时器
+        if self.shutdown_check_timer:
+            self.shutdown_check_timer.shutdown()
+            self.shutdown_check_timer = None
+            
+        if self.shutdown_timeout_timer:
+            self.shutdown_timeout_timer.shutdown()
+            self.shutdown_timeout_timer = None
+            
+        if self.yolo_shutdown_check_timer:
+            self.yolo_shutdown_check_timer.shutdown()
+            self.yolo_shutdown_check_timer = None
+            
+        if self.yolo_shutdown_timeout_timer:
+            self.yolo_shutdown_timeout_timer.shutdown()
+            self.yolo_shutdown_timeout_timer = None
         
         self.is_awake = False
         self.task_processed = False  # 重置任务处理标志
