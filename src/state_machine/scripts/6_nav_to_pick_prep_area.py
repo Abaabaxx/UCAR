@@ -10,6 +10,8 @@ from geometry_msgs.msg import PoseStamped
 from std_srvs.srv import Trigger, TriggerResponse
 # 导入语音播报服务消息
 from xf_mic_asr_offline.srv import VoiceCmd, VoiceCmdRequest
+import subprocess
+import rosnode
 
 """
 统一状态机节点（前半段）- 实现二维码识别与任务获取流程
@@ -42,8 +44,9 @@ class RobotState(object):
     ROTATE_TO_QR2 = 2
     NAVIGATE_TO_QR_AREA = 3
     WAIT_FOR_QR_RESULT = 4 
-    SPEAK_TASK_TYPE = 5    
-    NAV_TO_PICK_PREP_AREA = 6  # 关键桥梁状态：导航至拣货准备区
+    SHUTDOWN_QR_NODE = 5       # 新增状态：关闭二维码识别节点
+    SPEAK_TASK_TYPE = 6        # 原为 5
+    NAV_TO_PICK_PREP_AREA = 7  # 原为 6
     ERROR = 99
 
 # 所有事件的类
@@ -55,6 +58,7 @@ class Event(object):
     PERCEPTION_TIMEOUT = 4   
     SPEAK_DONE = 5           # 语音播放完成事件
     SPEAK_TIMEOUT = 6        # 语音播放超时事件
+    QR_NODE_SHUTDOWN_COMPLETE = 7 # 新增事件：二维码节点关闭完成
 
 # 领取到的任务类型的类
 class TaskType(object):
@@ -102,6 +106,7 @@ class UnifiedStateMachine(object):
         self.speak_timeout = 10.0  # 语音播放超时时间(秒)
         self.current_voice_cmd = None  # 当前播放的语音命令
         self.voice_service_called = False  # 标记语音服务是否已调用
+        self.shutdown_check_timer = None  # 节点关闭检查定时器
 
     def init_ros_comm(self):
         self.state_pub = rospy.Publisher('/robot/current_state', String, queue_size=1)
@@ -210,9 +215,26 @@ class UnifiedStateMachine(object):
             self.task_processed = False
             self.start_perception_timer()
             
+        # 关闭二维码识别节点状态
+        elif self.current_state == RobotState.SHUTDOWN_QR_NODE:
+            rospy.loginfo("5-正在关闭二维码识别节点 /qr_detect ...")
+            try:
+                # 使用subprocess调用rosnode kill命令
+                subprocess.call(['rosnode', 'kill', '/qr_detect'])
+                rospy.loginfo("已发送关闭命令，启动验证定时器...")
+                
+                # 启动一个循环定时器来验证节点是否真的关闭
+                self.shutdown_check_timer = rospy.Timer(
+                    rospy.Duration(0.25), # 每0.25秒检查一次
+                    self._check_qr_node_shutdown_status
+                )
+            except Exception as e:
+                rospy.logerr("关闭 /qr_detect 节点时发生错误: %s", str(e))
+                self.transition(RobotState.ERROR)
+            
         # 播报任务类型状态
         elif self.current_state == RobotState.SPEAK_TASK_TYPE:
-            rospy.loginfo("5-播报任务类型: %s", self.task_type)
+            rospy.loginfo("6-播报任务类型: %s", self.task_type)
             
             # 根据任务类型选择播报内容
             if self.task_type == TaskType.FRUITS:
@@ -239,7 +261,7 @@ class UnifiedStateMachine(object):
             
         # 导航至拣货准备区状态（桥梁状态）
         elif self.current_state == RobotState.NAV_TO_PICK_PREP_AREA:
-            rospy.loginfo("6-导航至拣货准备区（桥梁状态）")
+            rospy.loginfo("7-导航至拣货准备区（桥梁状态）")
             self.send_nav_goal('pick_prep_area')
             self.navigation_active = True
             
@@ -282,11 +304,17 @@ class UnifiedStateMachine(object):
                 self.stop_perception_timer()
                 rospy.loginfo("收到有效的二维码结果，任务类型: %s", self.task_type)
                 self.publish_task_type()
-                # 转换到播报任务类型状态
-                self.transition(RobotState.SPEAK_TASK_TYPE)
+                # 转换到关闭二维码节点状态
+                self.transition(RobotState.SHUTDOWN_QR_NODE)
             elif event == Event.PERCEPTION_TIMEOUT:
                 rospy.logerr("二维码识别超时")
                 self.transition(RobotState.ERROR)
+                
+        # 关闭二维码节点状态的事件处理
+        elif self.current_state == RobotState.SHUTDOWN_QR_NODE:
+            if event == Event.QR_NODE_SHUTDOWN_COMPLETE:
+                rospy.loginfo("节点关闭已确认，准备播报任务类型。")
+                self.transition(RobotState.SPEAK_TASK_TYPE)
                 
         # 播报任务类型状态的事件处理
         elif self.current_state == RobotState.SPEAK_TASK_TYPE:
@@ -489,6 +517,35 @@ class UnifiedStateMachine(object):
         if self.current_state == RobotState.SPEAK_TASK_TYPE:
             self.handle_event(Event.SPEAK_TIMEOUT)
 
+    def _check_qr_node_shutdown_status(self, event):
+        """定时器回调，用于检查/qr_detect节点是否已关闭。"""
+        try:
+            # 获取当前所有节点的列表
+            active_nodes = rosnode.get_node_names()
+            
+            # 检查目标节点是否还在列表中
+            if '/qr_detect' not in active_nodes:
+                rospy.loginfo("确认 /qr_detect 节点已成功关闭。")
+                
+                # 停止本定时器
+                if self.shutdown_check_timer is not None:
+                    self.shutdown_check_timer.shutdown()
+                    self.shutdown_check_timer = None
+                
+                # 触发关闭完成事件，驱动状态机继续
+                self.handle_event(Event.QR_NODE_SHUTDOWN_COMPLETE)
+            else:
+                # 节点仍在运行，继续等待下一次检查
+                rospy.loginfo("等待 /qr_detect 节点关闭...")
+        except Exception as e:
+            rospy.logerr("检查节点状态时出错: %s", str(e))
+            # 发生异常时也停止定时器，防止死循环
+            if self.shutdown_check_timer is not None:
+                self.shutdown_check_timer.shutdown()
+                self.shutdown_check_timer = None
+            # 也可以考虑转换到ERROR状态
+            self.transition(RobotState.ERROR)
+
     #*********************** 导航相关功能 ***********************#
     # 发送导航目标
     def send_nav_goal(self, location_name):
@@ -524,6 +581,11 @@ class UnifiedStateMachine(object):
         if self.speak_timer:
             self.speak_timer.shutdown()
             self.speak_timer = None
+            
+        # 停止节点关闭检查定时器
+        if self.shutdown_check_timer:
+            self.shutdown_check_timer.shutdown()
+            self.shutdown_check_timer = None
         
         self.is_awake = False
         self.task_processed = False  # 重置任务处理标志
