@@ -12,13 +12,15 @@ from std_srvs.srv import Trigger, TriggerResponse
 from xf_mic_asr_offline.srv import VoiceCmd, VoiceCmdRequest
 
 """
-状态机功能说明：
-1. 添加了语音播报的超时处理机制
-2. 添加了语音播报完成事件处理
-3. 添加了导航至拣货识别区状态
-4. 添加了旋转搜索和定位物品状态
-5. 与新版二维码识别节点和语音播报节点兼容
-6. 使用服务方式调用语音播报节点
+统一状态机节点（前半段）- 实现二维码识别与任务获取流程
+
+功能说明：
+1. 实现了UnifiedStateMachine的前半段功能（状态0-6）
+2. 添加了语音播报的超时处理机制
+3. 添加了语音播报完成事件处理
+4. 与新版二维码识别节点和语音播报节点兼容
+5. 使用服务方式调用语音播报节点
+6. 在导航到拣货准备区后结束，不进入后续状态
 
 使用方法：
 1. 启动状态机：
@@ -30,9 +32,6 @@ from xf_mic_asr_offline.srv import VoiceCmd, VoiceCmdRequest
 状态机的本质原理：
 在当前状态下执行当前状态对应的动作 execute_state_actions（该函数根据当前状态决定执行什么动作）
 状态的切换依靠事件的触发（对应的回调函数），在回调函数中执行状态的切换
-作者：abaabaxxx
-创建时间：2025-05-1 21:07:03
-最后修改：2025-05-1 13:29:44
 """
 
 #********************************* 常量定义 *********************************#
@@ -44,8 +43,7 @@ class RobotState(object):
     NAVIGATE_TO_QR_AREA = 3
     WAIT_FOR_QR_RESULT = 4 
     SPEAK_TASK_TYPE = 5    
-    NAVIGATE_TO_PICKING_AREA = 6  # 新增状态：导航至拣货识别区
-    ROTATE_AND_LOCATE = 7         # 新增状态：旋转搜索&定位物品
+    NAV_TO_PICK_PREP_AREA = 6  # 关键桥梁状态：导航至拣货准备区
     ERROR = 99
 
 # 所有事件的类
@@ -67,9 +65,9 @@ class TaskType(object):
 
 #********************************* 主状态机类 *********************************#
 # 主状态机
-class RobotStateMachine(object):
+class UnifiedStateMachine(object):
     def __init__(self):
-        rospy.init_node('robot_state_machine')
+        rospy.init_node('unified_state_machine', anonymous=True)
         
         # 初始化成员变量
         self.delay_timer = None
@@ -81,7 +79,7 @@ class RobotStateMachine(object):
         self.init_ros_comm()
         self.init_locations()
         
-        rospy.loginfo("状态机初始化完成（支持语音唤醒和服务调用，包含二维码处理与语音播报功能）")
+        rospy.loginfo("统一状态机（前半段）初始化完成（支持语音唤醒和服务调用，包含二维码处理与语音播报功能）")
         rospy.loginfo("等待语音唤醒或服务调用...")
         
         # 广播当前状态
@@ -133,7 +131,7 @@ class RobotStateMachine(object):
             'qr1': self.create_pose(2.07, 0.60, 0.3007, 0.9537),
             'qr2': self.create_pose(2.07, 0.60, 0.9747, 0.2239),
             'qr_area': self.create_pose(1.25, 0.75, -1.0, 0.0),
-            'picking_area': self.create_pose(1.25, 3.75, 0.7071, 0.7071),  # 新增位置：拣货识别区
+            'pick_prep_area': self.create_pose(0.5, 2.0, 0.7071, 0.7071),  # 桥梁位置：拣货准备区
         }
 
     # 创建目标位置的函数,辅助状态初始化
@@ -239,17 +237,11 @@ class RobotStateMachine(object):
             
 
             
-        # 导航至拣货识别区状态
-        elif self.current_state == RobotState.NAVIGATE_TO_PICKING_AREA:
-            rospy.loginfo("6-导航至拣货识别区")
-            self.send_nav_goal('picking_area')
+        # 导航至拣货准备区状态（桥梁状态）
+        elif self.current_state == RobotState.NAV_TO_PICK_PREP_AREA:
+            rospy.loginfo("6-导航至拣货准备区（桥梁状态）")
+            self.send_nav_goal('pick_prep_area')
             self.navigation_active = True
-            
-        # 旋转搜索与定位物品状态 - 仅保持状态稳定
-        elif self.current_state == RobotState.ROTATE_AND_LOCATE:
-            rospy.loginfo("7-旋转搜索&定位物品状态（仅状态保持，不执行实际动作）")
-            # 此状态下不执行实际动作，仅作为状态稳定的标记
-            rospy.loginfo("当前流程结束，等待手动重置状态机...")
             
         elif self.current_state == RobotState.ERROR:
             rospy.logerr("99-错误状态，停止所有活动")
@@ -299,19 +291,17 @@ class RobotStateMachine(object):
         # 播报任务类型状态的事件处理
         elif self.current_state == RobotState.SPEAK_TASK_TYPE:
             if event == Event.SPEAK_DONE:
-                rospy.loginfo("语音播报完成，准备导航至拣货识别区")
-                # 转换到导航至拣货识别区状态
-                self.transition(RobotState.NAVIGATE_TO_PICKING_AREA)
+                rospy.loginfo("语音播报完成，准备导航至拣货准备区")
+                # 转换到导航至拣货准备区状态
+                self.transition(RobotState.NAV_TO_PICK_PREP_AREA)
             elif event == Event.SPEAK_TIMEOUT:
                 rospy.logerr("语音播报超时")
                 self.transition(RobotState.ERROR)
                 
-        # 导航至拣货识别区状态的事件处理
-        elif self.current_state == RobotState.NAVIGATE_TO_PICKING_AREA:
+        # 导航至拣货准备区状态的事件处理
+        elif self.current_state == RobotState.NAV_TO_PICK_PREP_AREA:
             if event == Event.NAV_DONE_SUCCESS:
-                rospy.loginfo("导航至拣货识别区完成，准备进入旋转搜索&定位物品状态")
-                # 转换到旋转搜索与定位物品状态
-                self.transition(RobotState.ROTATE_AND_LOCATE)
+                rospy.loginfo("成功抵达拣货准备区。前半段任务完成，保持当前状态。")
             elif event == Event.NAV_DONE_FAILURE:
                 self.transition(RobotState.ERROR)
 
@@ -544,7 +534,7 @@ class RobotStateMachine(object):
 #*********************** 主函数 ***********************#
 if __name__ == '__main__':
     try:
-        robot_sm = RobotStateMachine()
+        robot_sm = UnifiedStateMachine()
         rospy.spin()
     except rospy.ROSInterruptException:
         pass

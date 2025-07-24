@@ -18,6 +18,6 @@
     <node pkg="xf_mic_asr_offline" type="voice_player.py" name="voice_player_node" output="screen" />
 
     <!-- 状态机节点 -->
-    <node pkg="state_machine" type="6_nav_to_picking.py" name="state_machine_node" output="screen" />
+    <node pkg="state_machine" type="6_nav_to_pick_prep_area.py" name="state_machine_node" output="screen" />
 
 </launch>
