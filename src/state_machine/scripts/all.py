@@ -160,7 +160,6 @@ class UnifiedStateMachine(object):
             'desserts': ['milk', 'cake', 'cola'],
             'vegetables': ['pepper', 'potato', 'tomato']
         }
-        self.current_task = 'fruits'  # 默认任务
         self.yolo_confidence_threshold = 0.6 # YOLO识别的置信度阈值
         self.found_good_name = None   # 用于存储找到的货物名称
         
@@ -671,12 +670,12 @@ class UnifiedStateMachine(object):
         寻找符合当前任务的货物，采用"先到先得"策略。
         """
         rospy.loginfo("开始在当前位置检测货物，任务类型: %s，监听时间: %.1f秒", 
-                    self.current_task, timeout)
+                    self.task_type, timeout)
         
         # 获取当前任务对应的目标货物列表
-        target_goods = self.goods_categories.get(self.current_task, [])
+        target_goods = self.goods_categories.get(self.task_type, [])
         if not target_goods:
-            rospy.logwarn("当前任务'%s'没有对应的目标货物列表", self.current_task)
+            rospy.logwarn("当前任务'%s'没有对应的目标货物列表", self.task_type)
             return None
         
         rospy.loginfo("正在寻找以下货物：%s，置信度阈值：%.2f", 
@@ -840,12 +839,12 @@ class UnifiedStateMachine(object):
     # 执行巡检序列
     def execute_patrol_sequence(self):
         """执行多点巡检导航逻辑，寻找目标货物"""
-        rospy.loginfo("开始执行多点巡检导航，寻找 %s 类别的货物...", self.current_task)
+        rospy.loginfo("开始执行多点巡检导航，寻找 %s 类别的货物...", self.task_type)
         
         # 获取当前任务需要检测的货物列表
-        target_goods = self.goods_categories.get(self.current_task, [])
+        target_goods = self.goods_categories.get(self.task_type, [])
         if not target_goods:
-            rospy.logwarn("当前任务'%s'没有对应的目标货物，巡检将无法找到目标", self.current_task)
+            rospy.logwarn("当前任务'%s'没有对应的目标货物，巡检将无法找到目标", self.task_type)
         else:
             rospy.loginfo("本次巡检目标货物: %s", ", ".join(target_goods))
         
