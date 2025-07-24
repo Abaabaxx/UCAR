@@ -1,5 +1,4 @@
 <launch>
-    <!--只循导航到目标板前，yolo识别，但模拟语音播报-->
     
     <!-- 导航模块 -->
     <include file="$(find ucar_nav)/launch/base_ekf.launch" />
