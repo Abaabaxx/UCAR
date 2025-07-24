@@ -59,6 +59,7 @@ class Event(object):
     SPEAK_DONE = 5           # 语音播放完成事件
     SPEAK_TIMEOUT = 6        # 语音播放超时事件
     QR_NODE_SHUTDOWN_COMPLETE = 7 # 新增事件：二维码节点关闭完成
+    QR_NODE_SHUTDOWN_TIMEOUT = 8 # 新增事件：二维码节点关闭超时
 
 # 领取到的任务类型的类
 class TaskType(object):
@@ -107,6 +108,8 @@ class UnifiedStateMachine(object):
         self.current_voice_cmd = None  # 当前播放的语音命令
         self.voice_service_called = False  # 标记语音服务是否已调用
         self.shutdown_check_timer = None  # 节点关闭检查定时器
+        self.shutdown_timeout_timer = None # 用于超时保护的定时器
+        self.qr_shutdown_timeout_duration = 5.0 # 关闭节点的总超时时间(秒)
 
     def init_ros_comm(self):
         self.state_pub = rospy.Publisher('/robot/current_state', String, queue_size=1)
@@ -221,12 +224,19 @@ class UnifiedStateMachine(object):
             try:
                 # 使用subprocess调用rosnode kill命令
                 subprocess.call(['rosnode', 'kill', '/qr_detect'])
-                rospy.loginfo("已发送关闭命令，启动验证定时器...")
+                rospy.loginfo("已发送关闭命令，启动验证和超时定时器...")
                 
-                # 启动一个循环定时器来验证节点是否真的关闭
+                # 启动"检查"定时器 (循环)
                 self.shutdown_check_timer = rospy.Timer(
-                    rospy.Duration(0.25), # 每0.25秒检查一次
+                    rospy.Duration(0.25), 
                     self._check_qr_node_shutdown_status
+                )
+                
+                # 启动"超时"定时器 (一次性)
+                self.shutdown_timeout_timer = rospy.Timer(
+                    rospy.Duration(self.qr_shutdown_timeout_duration),
+                    self._handle_qr_node_shutdown_timeout,
+                    oneshot=True
                 )
             except Exception as e:
                 rospy.logerr("关闭 /qr_detect 节点时发生错误: %s", str(e))
@@ -315,6 +325,9 @@ class UnifiedStateMachine(object):
             if event == Event.QR_NODE_SHUTDOWN_COMPLETE:
                 rospy.loginfo("节点关闭已确认，准备播报任务类型。")
                 self.transition(RobotState.SPEAK_TASK_TYPE)
+            elif event == Event.QR_NODE_SHUTDOWN_TIMEOUT:
+                # 当超时事件发生时，转换到错误状态
+                self.transition(RobotState.ERROR)
                 
         # 播报任务类型状态的事件处理
         elif self.current_state == RobotState.SPEAK_TASK_TYPE:
@@ -527,7 +540,12 @@ class UnifiedStateMachine(object):
             if '/qr_detect' not in active_nodes:
                 rospy.loginfo("确认 /qr_detect 节点已成功关闭。")
                 
-                # 停止本定时器
+                # 【关键新增】停止"超时"定时器，因为它不再需要了
+                if self.shutdown_timeout_timer is not None:
+                    self.shutdown_timeout_timer.shutdown()
+                    self.shutdown_timeout_timer = None
+                
+                # 停止本"检查"定时器
                 if self.shutdown_check_timer is not None:
                     self.shutdown_check_timer.shutdown()
                     self.shutdown_check_timer = None
@@ -545,6 +563,18 @@ class UnifiedStateMachine(object):
                 self.shutdown_check_timer = None
             # 也可以考虑转换到ERROR状态
             self.transition(RobotState.ERROR)
+
+    def _handle_qr_node_shutdown_timeout(self, event):
+        """当关闭/qr_detect节点超时后，此回调被触发。"""
+        rospy.logerr("关闭 /qr_detect 节点超时！(超过 %.1f 秒)", self.qr_shutdown_timeout_duration)
+        
+        # 停止"检查"定时器，因为它已经没用了
+        if self.shutdown_check_timer is not None:
+            self.shutdown_check_timer.shutdown()
+            self.shutdown_check_timer = None
+        
+        # 触发超时事件，让状态机进入错误状态
+        self.handle_event(Event.QR_NODE_SHUTDOWN_TIMEOUT)
 
     #*********************** 导航相关功能 ***********************#
     # 发送导航目标
@@ -586,6 +616,11 @@ class UnifiedStateMachine(object):
         if self.shutdown_check_timer:
             self.shutdown_check_timer.shutdown()
             self.shutdown_check_timer = None
+            
+        # 停止节点关闭超时定时器
+        if self.shutdown_timeout_timer:
+            self.shutdown_timeout_timer.shutdown()
+            self.shutdown_timeout_timer = None
         
         self.is_awake = False
         self.task_processed = False  # 重置任务处理标志

@@ -1,6 +1,6 @@
 ```mermaid
 stateDiagram-v2
-    %% @title 前半段状态机流程 (简化版)
+    %% @title 前半段状态机流程 (最终版-包含超时保护)
     
     %% --- 状态定义 ---
     IDLE: 0-IDLE 空闲
@@ -32,7 +32,10 @@ stateDiagram-v2
     ROTATE_TO_QR2 --> ERROR: Event.NAV_DONE_FAILURE
     NAVIGATE_TO_QR_AREA --> ERROR: Event.NAV_DONE_FAILURE
     WAIT_FOR_QR_RESULT --> ERROR: Event.PERCEPTION_TIMEOUT
-    SHUTDOWN_QR_NODE --> ERROR: 关闭或验证失败
+    
+    %% -- 关键更新点：明确指出超时事件 --
+    SHUTDOWN_QR_NODE --> ERROR: Event.QR_NODE_SHUTDOWN_TIMEOUT
+    
     SPEAK_TASK_TYPE --> ERROR: Event.SPEAK_TIMEOUT
     NAV_TO_PICK_PREP_AREA --> ERROR: Event.NAV_DONE_FAILURE
     
