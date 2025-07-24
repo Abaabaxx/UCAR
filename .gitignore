@@ -22,7 +22,6 @@ compile_commands.json
 *.swp
 *~
 .DS_Store
-.cursor/
 # =========================
 # Python 缓存
 # =========================

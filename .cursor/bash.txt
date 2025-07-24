@@ -1,0 +1,9 @@
+# 1. 确保在正确的本地分支
+git checkout lby_dev
+
+# 2. 更新本地的远程仓库信息（更新：更新本地的远程仓库信息，拉取：更新本地的远程仓库信息+将这个远程仓库代码和本地代码合并）
+git fetch origin
+
+# 3. 强制重置本地分支并清理工作区，使其与远程完全一致
+git reset --hard origin/lby_dev
+git clean -df
