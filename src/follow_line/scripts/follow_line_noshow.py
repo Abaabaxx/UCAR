@@ -45,16 +45,6 @@ IPM_ROI_H = 240  # ROI高度
 IPM_ROI_X = 0    # ROI起始X坐标
 IPM_ROI_W = 640  # ROI宽度
 
-# --- 可视化开关 ---
-# 设置为 True 来显示对应的处理阶段窗口，设置为 False 来隐藏
-SHOW_ORIGINAL = False
-SHOW_GRAYSCALE = False
-SHOW_GAUSSIAN = False
-SHOW_CANNY = False
-SHOW_IPM_RAW = False        # 显示原始的、未经形态学处理的鸟瞰图
-SHOW_IPM_MORPHED = False     # 显示经过形态学处理后的完整鸟瞰图
-SHOW_FINAL_ROI = True       # 显示最终用于分析的ROI区域
-
 # 定义沿墙走的搜索模式（Follow The Wall）
 FTW_SEEDS = [
     (-1, 0),    # 左
@@ -168,111 +158,75 @@ class LineFollowerNode:
         # 从处理后的鸟瞰图中截取ROI区域
         final_roi_frame = morphed_full_ipm[IPM_ROI_Y:IPM_ROI_Y + IPM_ROI_H, IPM_ROI_X:IPM_ROI_X + IPM_ROI_W]
         
-        # 显示处理过程的中间结果
-        if SHOW_ORIGINAL:
-            cv2.imshow('Original Frame', frame)
-        if SHOW_GRAYSCALE:
-            cv2.imshow('Grayscale Frame', gray_frame)
-        if SHOW_GAUSSIAN:
-            cv2.imshow('Gaussian Blurred Frame', blurred_frame)
-        if SHOW_CANNY:
-            cv2.imshow('Canny Edges', canny_edges)
-        if SHOW_IPM_RAW:
-            cv2.imshow('IPM Bird-eye View', ipm_frame)
-        if SHOW_IPM_MORPHED:
-            cv2.imshow('Morphed Full IPM', morphed_full_ipm)
-        if SHOW_FINAL_ROI:
-            # 对ROI区域进行二值化处理
-            _, binary_roi_frame = cv2.threshold(final_roi_frame, 5, 255, cv2.THRESH_BINARY)
-            
-            # 为了在上面画图，我们先将ROI二值图转换为BGR彩色图
-            roi_display = cv2.cvtColor(binary_roi_frame, cv2.COLOR_GRAY2BGR)
+        # 对ROI区域进行二值化处理
+        _, binary_roi_frame = cv2.threshold(final_roi_frame, 5, 255, cv2.THRESH_BINARY)
 
-            # 获取ROI的尺寸
-            roi_h, roi_w = binary_roi_frame.shape[:2]
-            
-            # 初始化中心点和起始点坐标
-            center_x = roi_w // 2
-            right_start_point = None
-            current_scan_y = None
+        # 获取ROI的尺寸
+        roi_h, roi_w = binary_roi_frame.shape[:2]
+        
+        # 初始化中心点和起始点坐标
+        center_x = roi_w // 2
+        right_start_point = None
+        current_scan_y = None
 
-            # 从底部开始，每隔START_POINT_SCAN_STEP个像素向上扫描，寻找右边线起始点
-            for y in range(roi_h - 1, 0, -START_POINT_SCAN_STEP):
-                for x in range(center_x, roi_w - 1):
-                    if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x + 1] == 255:
-                        right_start_point = (x + 1, y)
-                        current_scan_y = y
-                        break
-                
-                if right_start_point is not None:
+        # 从底部开始，每隔START_POINT_SCAN_STEP个像素向上扫描，寻找右边线起始点
+        for y in range(roi_h - 1, 0, -START_POINT_SCAN_STEP):
+            for x in range(center_x, roi_w - 1):
+                if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x + 1] == 255:
+                    right_start_point = (x + 1, y)
+                    current_scan_y = y
                     break
             
-            # 可视化：画出扫描线和找到的起始点
-            if current_scan_y is not None:
-                cv2.line(roi_display, (0, current_scan_y), (roi_w, current_scan_y), (255, 0, 0), 1)
+            if right_start_point is not None:
+                break
+        
+        if right_start_point:
+            # 使用沿墙走算法寻找右边界
+            right_points = follow_the_wall(binary_roi_frame, right_start_point)
             
-            if right_start_point:
-                # 在右起始点画一个红色的圆
-                cv2.circle(roi_display, right_start_point, 5, (0, 0, 255), -1)
-                
-                # 使用沿墙走算法寻找右边界
-                right_points = follow_the_wall(binary_roi_frame, right_start_point)
-                
-                # 提取最终的右边线
-                final_right_border = None
-                if right_points:
-                    final_right_border = extract_final_border(roi_h, right_points)
-                
-                # 如果成功提取到右边线，计算error
-                if final_right_border is not None:
-                    # 确定基准点和锚点行
-                    base_y = right_start_point[1]
-                    anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
-                    
-                    # 收集目标区域内的点
-                    roi_points = []
-                    for y, x in enumerate(final_right_border):
-                        if anchor_y <= y <= base_y and x != -1:
-                            # 计算中心线点
-                            center_x = x + CENTER_LINE_OFFSET
-                            if 0 <= center_x < roi_w:
-                                roi_points.append((center_x, y))
-                                # 绘制区域内的中心线点（青色）
-                                cv2.circle(roi_display, (center_x, y), 2, (255, 255, 0), -1)
-                    
-                    # 计算error
-                    error = 0.0
-                    if roi_points:
-                        avg_x = sum(p[0] for p in roi_points) / len(roi_points)
-                        error = avg_x - (roi_w // 2)
-                        
-                        # 计算PID控制器的输出
-                        p_term = Kp * error
-                        self.integral += error
-                        i_term = Ki * self.integral
-                        derivative = error - self.last_error
-                        d_term = Kd * derivative
-                        self.last_error = error
-                        
-                        # 计算最终的转向角度
-                        steering_angle = p_term + i_term + d_term
-                        
-                        # 找到并绘制胡萝卜点
-                        if final_right_border[anchor_y] != -1:
-                            carrot_x = final_right_border[anchor_y] + CENTER_LINE_OFFSET
-                            if 0 <= carrot_x < roi_w:
-                                cv2.drawMarker(roi_display, (carrot_x, anchor_y), 
-                                             (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
-                    
-                        # 按指定频率打印error和steering_angle
-                        current_time = time.time()
-                        if current_time - self.last_print_time >= 1.0 / PRINT_HZ:
-                            rospy.loginfo("Error: %7.2f pixels | Steering Angle: %7.2f", 
-                                        error, steering_angle)
-                            self.last_print_time = current_time
+            # 提取最终的右边线
+            final_right_border = None
+            if right_points:
+                final_right_border = extract_final_border(roi_h, right_points)
             
-            cv2.imshow('Final ROI', roi_display)
-            cv2.waitKey(1)
+            # 如果成功提取到右边线，计算error
+            if final_right_border is not None:
+                # 确定基准点和锚点行
+                base_y = right_start_point[1]
+                anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
+                
+                # 收集目标区域内的点
+                roi_points = []
+                for y, x in enumerate(final_right_border):
+                    if anchor_y <= y <= base_y and x != -1:
+                        # 计算中心线点
+                        center_x = x + CENTER_LINE_OFFSET
+                        if 0 <= center_x < roi_w:
+                            roi_points.append((center_x, y))
+                
+                # 计算error
+                error = 0.0
+                if roi_points:
+                    avg_x = sum(p[0] for p in roi_points) / len(roi_points)
+                    error = avg_x - (roi_w // 2)
+                    
+                    # 计算PID控制器的输出
+                    p_term = Kp * error
+                    self.integral += error
+                    i_term = Ki * self.integral
+                    derivative = error - self.last_error
+                    d_term = Kd * derivative
+                    self.last_error = error
+                    
+                    # 计算最终的转向角度
+                    steering_angle = p_term + i_term + d_term
+                    
+                    # 按指定频率打印error和steering_angle
+                    current_time = time.time()
+                    if current_time - self.last_print_time >= 1.0 / PRINT_HZ:
+                        rospy.loginfo("Error: %7.2f pixels | Steering Angle: %7.2f", 
+                                    error, steering_angle)
+                        self.last_print_time = current_time
 
 if __name__ == '__main__':
     try:
@@ -288,6 +242,4 @@ if __name__ == '__main__':
     except rospy.ROSInterruptException:
         pass
     finally:
-        # 关闭所有OpenCV窗口
-        cv2.destroyAllWindows()
-        rospy.loginfo("节点已关闭。") 
+        rospy.loginfo("节点已关闭。")
