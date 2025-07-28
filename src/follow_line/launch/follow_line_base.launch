@@ -5,4 +5,6 @@
     <!-- 自适应蒙特卡洛定位 (AMCL) -->
     <include file="$(find ucar_nav)/config/amcl_test/amcl_origin.launch" />
     
+    <!-- USB摄像头模块 -->
+    <include file="$(find lby_usb_cam)/launch/usb_cam_noimg_10hz.launch" />   
 </launch>
