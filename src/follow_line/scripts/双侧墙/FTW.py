@@ -38,14 +38,14 @@ PERFORM_HORIZONTAL_FLIP = True  # 是否执行水平翻转
 # 起始点寻找参数
 START_POINT_SCAN_STEP = 10  # 向上扫描的步长（像素）
 # 胡萝卜点参数
-LOOKAHEAD_DISTANCE = 10  # 胡萝卜点与基准点的距离（像素）
+LOOKAHEAD_DISTANCE = 15  # 胡萝卜点与基准点的距离（像素）
 PRINT_HZ = 4  # 打印error的频率（次/秒）
 # 路径规划参数
 CENTER_LINE_OFFSET_BASE = 47  # 基础偏移像素数（正值）
 # PID控制器参数
 Kp = 0.6  # 比例系数
 Ki = 0.0   # 积分系数
-Kd = 0.1   # 微分系数
+Kd = 0.5   # 微分系数
 # 速度控制参数
 LINEAR_SPEED = 0.1  # 前进速度 (m/s)
 ERROR_DEADZONE_PIXELS = 15  # 误差死区（像素），低于此值则认为方向正确
@@ -169,6 +169,8 @@ class LineFollowerNode:
         # 初始化特殊区域检测相关的状态变量
         self.consecutive_special_frames = 0
         self.in_special_area = False
+        # 添加一次性切换标志
+        self.has_switched_once = False
         
         # 将最大角速度从度转换为弧度
         self.max_angular_speed_rad = np.deg2rad(MAX_ANGULAR_SPEED_DEG)
@@ -219,6 +221,11 @@ class LineFollowerNode:
         data=True: 沿右墙走模式
         data=False: 沿左墙走模式
         """
+        if self.has_switched_once:
+            msg = "模式已自动切换并被锁定，无法手动更改。"
+            rospy.logwarn(msg)
+            return SetBoolResponse(success=False, message=msg)
+
         if request.data:
             self.wall_follow_mode = MODE_FOLLOW_RIGHT
             msg = "切换为向右巡线模式"
@@ -324,35 +331,31 @@ class LineFollowerNode:
                 wall_type = "左"
             
             # --- 特殊区域检测逻辑 ---
-            start_y = start_point[1]
-            
-            # 计算用于触发特殊区域检测的Y坐标阈值
-            # 当起始点的Y坐标小于这个值时，意味着它已经高于(进入了)底部常规区域
-            trigger_y_threshold = roi_h - NORMAL_AREA_HEIGHT_FROM_BOTTOM
-            
-            # 检查Y坐标是否在常规区域之外
-            if start_y < trigger_y_threshold:
-                self.consecutive_special_frames += 1
-            else:
-                # 如果在常规区域内，则重置计数器和状态
-                self.consecutive_special_frames = 0
-                if self.in_special_area:
-                    rospy.loginfo("--- 离开特殊区域（返回常规区域） ---")
-                    self.in_special_area = False
-
-            # 检查是否达到连续帧数要求，并且尚未标记为进入
-            if self.consecutive_special_frames >= CONSECUTIVE_FRAMES_FOR_DETECTION and not self.in_special_area:
-                self.in_special_area = True
-                rospy.loginfo("--- 检测到特殊区域 ---")
-                # 检查当前模式并将其翻转
-                if self.wall_follow_mode == MODE_FOLLOW_RIGHT:
-                    # 如果当前是"沿右墙"，则切换到"沿左墙"
-                    self.wall_follow_mode = MODE_FOLLOW_LEFT
-                    rospy.loginfo("自动切换巡线模式为: [沿左墙走]")
+            # 检查一次性切换是否已发生
+            if not self.has_switched_once:
+                # 如果尚未切换，则执行特殊区域检测逻辑
+                start_y = start_point[1]
+                trigger_y_threshold = roi_h - NORMAL_AREA_HEIGHT_FROM_BOTTOM
+                
+                if start_y < trigger_y_threshold:
+                    self.consecutive_special_frames += 1
                 else:
-                    # 如果当前是"沿左墙"，则切换到"沿右墙"
-                    self.wall_follow_mode = MODE_FOLLOW_RIGHT
-                    rospy.loginfo("自动切换巡线模式为: [沿右墙走]")
+                    self.consecutive_special_frames = 0
+                    if self.in_special_area:
+                        rospy.loginfo("--- 离开特殊区域（返回常规区域） ---")
+                        self.in_special_area = False
+                
+                # 检查是否满足切换条件
+                if self.consecutive_special_frames >= CONSECUTIVE_FRAMES_FOR_DETECTION and not self.in_special_area:
+                    self.in_special_area = True
+                    rospy.loginfo("--- 检测到特殊区域，执行唯一一次模式切换 ---")
+                    
+                    # 执行从右到左的永久切换
+                    self.wall_follow_mode = MODE_FOLLOW_LEFT
+                    rospy.loginfo("巡线模式已永久切换为: [沿左墙走]")
+                    
+                    # 设置标志，锁住模式，防止未来任何更改
+                    self.has_switched_once = True
             
             # 使用沿墙走算法寻找边界
             points = follow_the_wall(binary_roi_frame, start_point, current_seeds)
