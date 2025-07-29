@@ -7,6 +7,7 @@ import rospy
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from std_srvs.srv import SetBool, SetBoolResponse
+from geometry_msgs.msg import Twist
 import time
 '''
 可视化
@@ -42,7 +43,8 @@ Kp = 1  # 比例系数
 Ki = 0.0   # 积分系数
 Kd = 0.0   # 微分系数
 # 速度控制参数
-STEERING_TO_ANGULAR_VEL_RATIO = 0.02  # 转向角到角速度的转换系数
+LINEAR_SPEED = 0.1  # 前进速度 (m/s)
+STEERING_TO_ANGULAR_VEL_RATIO = 0.01  # 转向角到角速度的转换系数
 MAX_ANGULAR_SPEED_DEG = 30.0  # 最大角速度（度/秒）
 # 逆透视变换矩阵（从鸟瞰图坐标到原始图像坐标的映射）
 INVERSE_PERSPECTIVE_MATRIX = np.array([
@@ -146,17 +148,27 @@ class LineFollowerNode:
         self.image_sub = rospy.Subscriber(IMAGE_TOPIC, Image, self.image_callback)
         # 创建调试图像发布者
         self.debug_image_pub = rospy.Publisher(DEBUG_IMAGE_TOPIC, Image, queue_size=1)
+        # 创建速度指令发布者
+        self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         
         # 创建运行状态控制服务
         self.run_service = rospy.Service('/follow_line/run', SetBool, self.handle_set_running)
         
         rospy.loginfo("已创建图像订阅者和调试图像发布者，等待图像数据...")
 
+    def stop(self):
+        """发布停止指令"""
+        rospy.loginfo("发送停止指令...")
+        stop_msg = Twist()
+        self.cmd_vel_pub.publish(stop_msg)
+
     def handle_set_running(self, request):
         """
         处理运行状态切换请求
         """
         self.is_running = request.data
+        if not self.is_running:
+            self.stop()
         response = SetBoolResponse()
         response.success = True
         response.message = "Running state set to: {}".format(self.is_running)
@@ -284,6 +296,12 @@ class LineFollowerNode:
                     angular_z_rad = -1 * steering_angle * STEERING_TO_ANGULAR_VEL_RATIO
                     clipped_angular_z_rad = np.clip(angular_z_rad, -self.max_angular_speed_rad, self.max_angular_speed_rad)
                     final_angular_deg = np.rad2deg(clipped_angular_z_rad)
+                    
+                    # 创建并发布Twist消息
+                    twist_msg = Twist()
+                    twist_msg.linear.x = LINEAR_SPEED
+                    twist_msg.angular.z = clipped_angular_z_rad
+                    self.cmd_vel_pub.publish(twist_msg)
                     
                     # 找到并绘制胡萝卜点
                     if final_right_border[anchor_y] != -1:
