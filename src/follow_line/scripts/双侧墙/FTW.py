@@ -20,9 +20,10 @@ rosservice call /follow_line/run "data: true"
 rosservice call /follow_line/run "data: false"
 '''
 # --- 参数配置区 ---
-# 巡线模式定义
-MODE_FOLLOW_LEFT = 0
-MODE_FOLLOW_RIGHT = 1
+# 有限状态机（FSM）状态定义
+STATE_FOLLOW_RIGHT = 0          # 状态一：沿右墙巡线
+STATE_TRANSITION_STRAIGHT = 1   # 状态二：直行过渡
+STATE_FINAL_STOP = 2            # 状态三：最终停止
 
 # ROS话题参数
 IMAGE_TOPIC = "/usb_cam/image_raw"
@@ -38,14 +39,14 @@ PERFORM_HORIZONTAL_FLIP = True  # 是否执行水平翻转
 # 起始点寻找参数
 START_POINT_SCAN_STEP = 10  # 向上扫描的步长（像素）
 # 胡萝卜点参数
-LOOKAHEAD_DISTANCE = 15  # 胡萝卜点与基准点的距离（像素）
+LOOKAHEAD_DISTANCE = 10  # 胡萝卜点与基准点的距离（像素）
 PRINT_HZ = 4  # 打印error的频率（次/秒）
 # 路径规划参数
 CENTER_LINE_OFFSET_BASE = 47  # 基础偏移像素数（正值）
 # PID控制器参数
 Kp = 0.6  # 比例系数
 Ki = 0.0   # 积分系数
-Kd = 0.5   # 微分系数
+Kd = 0.1   # 微分系数
 # 速度控制参数
 LINEAR_SPEED = 0.1  # 前进速度 (m/s)
 ERROR_DEADZONE_PIXELS = 15  # 误差死区（像素），低于此值则认为方向正确
@@ -155,8 +156,8 @@ class LineFollowerNode:
         # 初始化运行状态
         self.is_running = False
         
-        # 初始化巡线模式（默认为沿右墙走）
-        self.wall_follow_mode = MODE_FOLLOW_RIGHT
+        # 初始化FSM状态
+        self.current_state = STATE_FOLLOW_RIGHT
         
         # 初始化cv_bridge
         self.bridge = CvBridge()
@@ -168,9 +169,6 @@ class LineFollowerNode:
         
         # 初始化特殊区域检测相关的状态变量
         self.consecutive_special_frames = 0
-        self.in_special_area = False
-        # 添加一次性切换标志
-        self.has_switched_once = False
         
         # 将最大角速度从度转换为弧度
         self.max_angular_speed_rad = np.deg2rad(MAX_ANGULAR_SPEED_DEG)
@@ -191,11 +189,9 @@ class LineFollowerNode:
         
         # 创建运行状态控制服务
         self.run_service = rospy.Service('/follow_line/run', SetBool, self.handle_set_running)
-        # 创建模式切换服务
-        self.mode_service = rospy.Service('/follow_line/set_mode', SetBool, self.handle_set_mode)
         
         rospy.loginfo("已创建图像订阅者和调试图像发布者，等待图像数据...")
-        rospy.loginfo("当前巡线模式: 沿右墙走")
+        rospy.loginfo("当前状态: 沿右墙巡线")
 
     def stop(self):
         """发布停止指令"""
@@ -214,26 +210,6 @@ class LineFollowerNode:
         response.success = True
         response.message = "Running state set to: {}".format(self.is_running)
         return response
-        
-    def handle_set_mode(self, request):
-        """
-        处理巡线模式切换请求
-        data=True: 沿右墙走模式
-        data=False: 沿左墙走模式
-        """
-        if self.has_switched_once:
-            msg = "模式已自动切换并被锁定，无法手动更改。"
-            rospy.logwarn(msg)
-            return SetBoolResponse(success=False, message=msg)
-
-        if request.data:
-            self.wall_follow_mode = MODE_FOLLOW_RIGHT
-            msg = "切换为向右巡线模式"
-        else:
-            self.wall_follow_mode = MODE_FOLLOW_LEFT
-            msg = "切换为向左巡线模式"
-        rospy.loginfo(msg)
-        return SetBoolResponse(success=True, message=msg)
 
     def image_callback(self, data):
         try:
@@ -252,6 +228,16 @@ class LineFollowerNode:
                 
         except CvBridgeError as e:
             rospy.logerr("图像转换错误: %s", str(e))
+            return
+            
+        # 如果已进入最终停止状态，则持续发送停止指令并终止后续处理
+        if self.current_state == STATE_FINAL_STOP:
+            self.stop()
+            try:
+                debug_img_msg = self.bridge.cv2_to_imgmsg(frame, "bgr8")
+                self.debug_image_pub.publish(debug_img_msg)
+            except CvBridgeError as e:
+                rospy.logerr("调试图像转换或发布错误: %s", str(e))
             return
             
         # 执行水平翻转（如果启用）
@@ -292,16 +278,19 @@ class LineFollowerNode:
         start_point = None
         current_scan_y = None
 
+        # 根据当前状态决定扫描哪一侧的墙
+        scan_for_left_wall = (self.current_state == STATE_TRANSITION_STRAIGHT)
+
         # 从底部开始，每隔START_POINT_SCAN_STEP个像素向上扫描，寻找边线起始点
         for y in range(roi_h - 1, 0, -START_POINT_SCAN_STEP):
-            if self.wall_follow_mode == MODE_FOLLOW_RIGHT:
+            if not scan_for_left_wall:  # 扫描右墙
                 # 从中心向右扫描寻找右边线的内侧起始点
                 for x in range(center_x, roi_w - 1):
                     if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x + 1] == 255:
                         start_point = (x + 1, y)
                         current_scan_y = y
                         break
-            else:  # MODE_FOLLOW_LEFT
+            else:  # 扫描左墙
                 # 从中心向左扫描寻找左边线的内侧起始点
                 for x in range(center_x, 0, -1):
                     if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x - 1] == 255:
@@ -320,136 +309,142 @@ class LineFollowerNode:
             # 在起始点画一个红色的圆
             cv2.circle(roi_display, start_point, 5, (0, 0, 255), -1)
             
-            # 根据当前模式选择正确的参数
-            if self.wall_follow_mode == MODE_FOLLOW_RIGHT:
-                current_seeds = FTW_SEEDS_RIGHT
-                offset_sign = -1
-                wall_type = "右"
-            else:
-                current_seeds = FTW_SEEDS_LEFT
-                offset_sign = 1
-                wall_type = "左"
-            
-            # --- 特殊区域检测逻辑 ---
-            # 检查一次性切换是否已发生
-            if not self.has_switched_once:
-                # 如果尚未切换，则执行特殊区域检测逻辑
+            # 根据当前状态执行相应的逻辑
+            if self.current_state == STATE_FOLLOW_RIGHT:
+                # --- 状态一：沿右墙巡线 ---
+                # 1. 检查状态转换条件（即检测到特殊区域）
                 start_y = start_point[1]
                 trigger_y_threshold = roi_h - NORMAL_AREA_HEIGHT_FROM_BOTTOM
-                
                 if start_y < trigger_y_threshold:
                     self.consecutive_special_frames += 1
                 else:
                     self.consecutive_special_frames = 0
-                    if self.in_special_area:
-                        rospy.loginfo("--- 离开特殊区域（返回常规区域） ---")
-                        self.in_special_area = False
-                
-                # 检查是否满足切换条件
-                if self.consecutive_special_frames >= CONSECUTIVE_FRAMES_FOR_DETECTION and not self.in_special_area:
-                    self.in_special_area = True
-                    rospy.loginfo("--- 检测到特殊区域，执行唯一一次模式切换 ---")
-                    
-                    # 执行从右到左的永久切换
-                    self.wall_follow_mode = MODE_FOLLOW_LEFT
-                    rospy.loginfo("巡线模式已永久切换为: [沿左墙走]")
-                    
-                    # 设置标志，锁住模式，防止未来任何更改
-                    self.has_switched_once = True
-            
-            # 使用沿墙走算法寻找边界
-            points = follow_the_wall(binary_roi_frame, start_point, current_seeds)
-            
-            # 提取最终的边线
-            final_border = None
-            if points:
-                final_border = extract_final_border(roi_h, points)
-            
-            # 如果成功提取到边线，计算error
-            if final_border is not None:
-                # 确定基准点和锚点行
-                base_y = start_point[1]
-                anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
-                
-                # 收集目标区域内的点
-                roi_points = []
-                for y, x in enumerate(final_border):
-                    if anchor_y <= y <= base_y and x != -1:
-                        # 计算中心线点
-                        center_x = x + (offset_sign * CENTER_LINE_OFFSET_BASE)
-                        if 0 <= center_x < roi_w:
-                            roi_points.append((center_x, y))
-                            # 绘制区域内的中心线点（青色）
-                            cv2.circle(roi_display, (center_x, y), 2, (255, 255, 0), -1)
-                
-                # 计算error
-                error = 0.0
-                if roi_points:
-                    avg_x = sum(p[0] for p in roi_points) / len(roi_points)
-                    error = avg_x - (roi_w // 2)
-                    
-                    # --- 新的状态机逻辑 ---
-                    # 初始化最终速度变量
-                    final_linear_x = 0.0
-                    final_angular_z_rad = 0.0
 
-                    # 检查误差是否超出死区
-                    if abs(error) > ERROR_DEADZONE_PIXELS:
-                        # 状态：原地旋转以修正方向
-                        # 线速度为0，只计算角速度
-                        final_linear_x = 0.0
-                        
-                        # 计算PID控制器的输出
-                        p_term = Kp * error
-                        self.integral += error
-                        i_term = Ki * self.integral
-                        derivative = error - self.last_error
-                        d_term = Kd * derivative
-                        self.last_error = error
-                        steering_angle = p_term + i_term + d_term
-                        
-                        # 计算角速度并进行限幅
-                        angular_z_rad = -1 * steering_angle * STEERING_TO_ANGULAR_VEL_RATIO
-                        final_angular_z_rad = np.clip(angular_z_rad, -self.max_angular_speed_rad, self.max_angular_speed_rad)
-                    
-                    else:
-                        # 状态：方向正确，直线前进
-                        # 角速度为0，只给定线速度
-                        final_linear_x = LINEAR_SPEED
-                        final_angular_z_rad = 0.0
-                        # 重置PID积分项和last_error，为下一次需要转向时做准备
-                        self.integral = 0.0
-                        self.last_error = 0.0
-                    
-                    # 将最终角速度转换为度/秒用于打印
-                    final_angular_deg = np.rad2deg(final_angular_z_rad)
-                    
-                    # 创建并发布速度指令
+                if self.consecutive_special_frames >= CONSECUTIVE_FRAMES_FOR_DETECTION:
+                    rospy.loginfo("状态转换: FOLLOW_RIGHT -> TRANSITION_STRAIGHT")
+                    self.current_state = STATE_TRANSITION_STRAIGHT
+                    # 立即进入直行状态，发布直行指令
                     twist_msg = Twist()
-                    twist_msg.linear.x = final_linear_x
-                    twist_msg.angular.z = final_angular_z_rad
+                    twist_msg.linear.x = LINEAR_SPEED
+                    twist_msg.angular.z = 0.0
                     self.cmd_vel_pub.publish(twist_msg)
+                else:
+                    # 2. 如果不转换，执行本状态的行为（PID巡右墙）
+                    # 使用沿墙走算法寻找右边界
+                    points = follow_the_wall(binary_roi_frame, start_point, FTW_SEEDS_RIGHT)
                     
-                    # 找到并绘制胡萝卜点
-                    if final_border[anchor_y] != -1:
-                        carrot_x = final_border[anchor_y] + (offset_sign * CENTER_LINE_OFFSET_BASE)
-                        if 0 <= carrot_x < roi_w:
-                            cv2.drawMarker(roi_display, (carrot_x, anchor_y), 
-                                         (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
+                    # 提取最终的右边线
+                    final_border = None
+                    if points:
+                        final_border = extract_final_border(roi_h, points)
+                    
+                    # 如果成功提取到右边线，计算error
+                    if final_border is not None:
+                        # 确定基准点和锚点行
+                        base_y = start_point[1]
+                        anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
+                        
+                        # 收集目标区域内的点
+                        roi_points = []
+                        for y, x in enumerate(final_border):
+                            if anchor_y <= y <= base_y and x != -1:
+                                # 计算中心线点
+                                center_x = x - CENTER_LINE_OFFSET_BASE
+                                if 0 <= center_x < roi_w:
+                                    roi_points.append((center_x, y))
+                                    # 绘制区域内的中心线点（青色）
+                                    cv2.circle(roi_display, (center_x, y), 2, (255, 255, 0), -1)
+                        
+                        # 计算error
+                        error = 0.0
+                        if roi_points:
+                            avg_x = sum(p[0] for p in roi_points) / len(roi_points)
+                            error = avg_x - (roi_w // 2)
+                            
+                            # --- 新的状态机逻辑 ---
+                            # 初始化最终速度变量
+                            final_linear_x = 0.0
+                            final_angular_z_rad = 0.0
+
+                            # 检查误差是否超出死区
+                            if abs(error) > ERROR_DEADZONE_PIXELS:
+                                # 状态：原地旋转以修正方向
+                                # 线速度为0，只计算角速度
+                                final_linear_x = 0.0
+                                
+                                # 计算PID控制器的输出
+                                p_term = Kp * error
+                                self.integral += error
+                                i_term = Ki * self.integral
+                                derivative = error - self.last_error
+                                d_term = Kd * derivative
+                                self.last_error = error
+                                steering_angle = p_term + i_term + d_term
+                                
+                                # 计算角速度并进行限幅
+                                angular_z_rad = -1 * steering_angle * STEERING_TO_ANGULAR_VEL_RATIO
+                                final_angular_z_rad = np.clip(angular_z_rad, -self.max_angular_speed_rad, self.max_angular_speed_rad)
+                            
+                            else:
+                                # 状态：方向正确，直线前进
+                                # 角速度为0，只给定线速度
+                                final_linear_x = LINEAR_SPEED
+                                final_angular_z_rad = 0.0
+                                # 重置PID积分项和last_error，为下一次需要转向时做准备
+                                self.integral = 0.0
+                                self.last_error = 0.0
+                            
+                            # 创建并发布速度指令
+                            twist_msg = Twist()
+                            twist_msg.linear.x = final_linear_x
+                            twist_msg.angular.z = final_angular_z_rad
+                            self.cmd_vel_pub.publish(twist_msg)
+                            
+                            # 将最终角速度转换为度/秒用于打印
+                            final_angular_deg = np.rad2deg(final_angular_z_rad)
+                            
+                            # 找到并绘制胡萝卜点
+                            if final_border[anchor_y] != -1:
+                                carrot_x = final_border[anchor_y] - CENTER_LINE_OFFSET_BASE
+                                if 0 <= carrot_x < roi_w:
+                                    cv2.drawMarker(roi_display, (carrot_x, anchor_y), 
+                                                 (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
+                        
+                            # 按指定频率打印error、线速度和角速度
+                            current_time = time.time()
+                            if current_time - self.last_print_time >= 1.0 / PRINT_HZ:
+                                rospy.loginfo("状态: FOLLOW_RIGHT | Error: %7.2f | Linear_x: %.2f | Angular_z: %7.2f deg/s", 
+                                            error, final_linear_x, final_angular_deg)
+                                self.last_print_time = current_time
+
+            elif self.current_state == STATE_TRANSITION_STRAIGHT:
+                # --- 状态二：直行过渡 ---
+                # 1. 执行本状态的行为（保持直行）
+                rospy.loginfo_throttle(1, "当前状态: TRANSITION_STRAIGHT, 正在直行...")
+                twist_msg = Twist()
+                twist_msg.linear.x = LINEAR_SPEED
+                twist_msg.angular.z = 0.0
+                self.cmd_vel_pub.publish(twist_msg)
+
+                # 2. 检查状态转换条件（左侧边线是否靠近底部）
+                transition_y_threshold = roi_h - 10
+                if start_point[1] > transition_y_threshold:
+                    rospy.loginfo("状态转换: TRANSITION_STRAIGHT -> FINAL_STOP")
+                    self.current_state = STATE_FINAL_STOP
+                    self.stop()  # 立即停止
                 
-                    # 按指定频率打印error、线速度和角速度
-                    current_time = time.time()
-                    if current_time - self.last_print_time >= 1.0 / PRINT_HZ:
-                        rospy.loginfo("模式: 沿%s墙 | Error: %7.2f | Linear_x: %.2f | Angular_z: %7.2f deg/s", 
-                                    wall_type, error, final_linear_x, final_angular_deg)
-                        self.last_print_time = current_time
+                # 可视化：绘制左侧边线
+                points = follow_the_wall(binary_roi_frame, start_point, FTW_SEEDS_LEFT)
+                if points:
+                    for point in points:
+                        cv2.circle(roi_display, point, 1, (0, 255, 255), -1)
+                    
+                    # 在图像上显示当前Y坐标和阈值
+                    cv2.putText(roi_display, "Y: {0}, Threshold: {1}".format(start_point[1], transition_y_threshold), 
+                               (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         else:
-            # 如果没有找到起始点，重置所有状态
-            self.consecutive_special_frames = 0
-            if self.in_special_area:
-                rospy.loginfo("--- 离开特殊区域（未找到边线） ---")
-                self.in_special_area = False
-            self.stop()  # 发送停止指令
+            # 如果没有找到起始点，发送停止指令
+            self.stop()
         
         # 发布调试图像
         try:
