@@ -33,19 +33,19 @@ PERFORM_HORIZONTAL_FLIP = True  # 是否执行水平翻转
 # 起始点寻找参数
 START_POINT_SCAN_STEP = 10  # 向上扫描的步长（像素）
 # 胡萝卜点参数
-LOOKAHEAD_DISTANCE = 80  # 胡萝卜点与基准点的距离（像素）
+LOOKAHEAD_DISTANCE = 40  # 胡萝卜点与基准点的距离（像素）
 PRINT_HZ = 4  # 打印error的频率（次/秒）
 # 路径规划参数
 CENTER_LINE_OFFSET = -47  # 从右边线向左偏移的像素数
 # PID控制器参数
 Kp = 1  # 比例系数
 Ki = 0.0   # 积分系数
-Kd = 0.0   # 微分系数
+Kd = 0.5   # 微分系数
 # 速度控制参数
 LINEAR_SPEED = 0.1  # 前进速度 (m/s)
 ERROR_DEADZONE_PIXELS = 10  # 误差死区（像素），低于此值则认为方向正确
 STEERING_TO_ANGULAR_VEL_RATIO = 0.02  # 转向角到角速度的转换系数
-MAX_ANGULAR_SPEED_DEG = 30.0  # 最大角速度（度/秒）
+MAX_ANGULAR_SPEED_DEG = 15.0  # 最大角速度（度/秒）
 # 逆透视变换矩阵（从鸟瞰图坐标到原始图像坐标的映射）
 INVERSE_PERSPECTIVE_MATRIX = np.array([
     [-3.365493,  2.608984, -357.317062],
