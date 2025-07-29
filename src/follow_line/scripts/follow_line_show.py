@@ -36,11 +36,14 @@ START_POINT_SCAN_STEP = 10  # 向上扫描的步长（像素）
 LOOKAHEAD_DISTANCE = 80  # 胡萝卜点与基准点的距离（像素）
 PRINT_HZ = 4  # 打印error的频率（次/秒）
 # 路径规划参数
-CENTER_LINE_OFFSET = -55  # 从右边线向左偏移的像素数
+CENTER_LINE_OFFSET = -47  # 从右边线向左偏移的像素数
 # PID控制器参数
 Kp = 1  # 比例系数
 Ki = 0.0   # 积分系数
 Kd = 0.0   # 微分系数
+# 速度控制参数
+STEERING_TO_ANGULAR_VEL_RATIO = 0.02  # 转向角到角速度的转换系数
+MAX_ANGULAR_SPEED_DEG = 30.0  # 最大角速度（度/秒）
 # 逆透视变换矩阵（从鸟瞰图坐标到原始图像坐标的映射）
 INVERSE_PERSPECTIVE_MATRIX = np.array([
     [-3.365493,  2.608984, -357.317062],
@@ -128,6 +131,9 @@ class LineFollowerNode:
         self.integral = 0.0
         self.last_error = 0.0
         self.last_print_time = time.time()
+        
+        # 将最大角速度从度转换为弧度
+        self.max_angular_speed_rad = np.deg2rad(MAX_ANGULAR_SPEED_DEG)
         
         # 计算正向透视变换矩阵
         try:
@@ -274,6 +280,11 @@ class LineFollowerNode:
                     # 计算最终的转向角度
                     steering_angle = p_term + i_term + d_term
                     
+                    # 计算角速度并进行限幅
+                    angular_z_rad = -1 * steering_angle * STEERING_TO_ANGULAR_VEL_RATIO
+                    clipped_angular_z_rad = np.clip(angular_z_rad, -self.max_angular_speed_rad, self.max_angular_speed_rad)
+                    final_angular_deg = np.rad2deg(clipped_angular_z_rad)
+                    
                     # 找到并绘制胡萝卜点
                     if final_right_border[anchor_y] != -1:
                         carrot_x = final_right_border[anchor_y] + CENTER_LINE_OFFSET
@@ -281,11 +292,11 @@ class LineFollowerNode:
                             cv2.drawMarker(roi_display, (carrot_x, anchor_y), 
                                          (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
                 
-                    # 按指定频率打印error和steering_angle
+                    # 按指定频率打印error、steering_angle和最终角速度
                     current_time = time.time()
                     if current_time - self.last_print_time >= 1.0 / PRINT_HZ:
-                        rospy.loginfo("Error: %7.2f pixels | Steering Angle: %7.2f", 
-                                    error, steering_angle)
+                        rospy.loginfo("Error: %7.2f pixels | PID Output: %7.2f | Angular Speed: %7.2f deg/s", 
+                                    error, steering_angle, final_angular_deg)
                         self.last_print_time = current_time
         
         # 发布调试图像
