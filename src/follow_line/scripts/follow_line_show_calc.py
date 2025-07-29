@@ -42,6 +42,8 @@ Kp = 1  # 比例系数
 Ki = 0.0   # 积分系数
 Kd = 0.0   # 微分系数
 # 速度控制参数
+LINEAR_SPEED = 0.1  # 前进速度 (m/s)
+ERROR_DEADZONE_PIXELS = 10  # 误差死区（像素），低于此值则认为方向正确
 STEERING_TO_ANGULAR_VEL_RATIO = 0.02  # 转向角到角速度的转换系数
 MAX_ANGULAR_SPEED_DEG = 30.0  # 最大角速度（度/秒）
 # 逆透视变换矩阵（从鸟瞰图坐标到原始图像坐标的映射）
@@ -269,21 +271,41 @@ class LineFollowerNode:
                     avg_x = sum(p[0] for p in roi_points) / len(roi_points)
                     error = avg_x - (roi_w // 2)
                     
-                    # 计算PID控制器的输出
-                    p_term = Kp * error
-                    self.integral += error
-                    i_term = Ki * self.integral
-                    derivative = error - self.last_error
-                    d_term = Kd * derivative
-                    self.last_error = error
+                    # --- 新的状态机逻辑 ---
+                    # 初始化最终速度变量
+                    final_linear_x = 0.0
+                    final_angular_z_rad = 0.0
+
+                    # 检查误差是否超出死区
+                    if abs(error) > ERROR_DEADZONE_PIXELS:
+                        # 状态：原地旋转以修正方向
+                        # 线速度为0，只计算角速度
+                        final_linear_x = 0.0
+                        
+                        # 计算PID控制器的输出
+                        p_term = Kp * error
+                        self.integral += error
+                        i_term = Ki * self.integral
+                        derivative = error - self.last_error
+                        d_term = Kd * derivative
+                        self.last_error = error
+                        steering_angle = p_term + i_term + d_term
+                        
+                        # 计算角速度并进行限幅
+                        angular_z_rad = -1 * steering_angle * STEERING_TO_ANGULAR_VEL_RATIO
+                        final_angular_z_rad = np.clip(angular_z_rad, -self.max_angular_speed_rad, self.max_angular_speed_rad)
                     
-                    # 计算最终的转向角度
-                    steering_angle = p_term + i_term + d_term
+                    else:
+                        # 状态：方向正确，直线前进
+                        # 角速度为0，只给定线速度
+                        final_linear_x = LINEAR_SPEED
+                        final_angular_z_rad = 0.0
+                        # 重置PID积分项和last_error，为下一次需要转向时做准备
+                        self.integral = 0.0
+                        self.last_error = 0.0
                     
-                    # 计算角速度并进行限幅
-                    angular_z_rad = -1 * steering_angle * STEERING_TO_ANGULAR_VEL_RATIO
-                    clipped_angular_z_rad = np.clip(angular_z_rad, -self.max_angular_speed_rad, self.max_angular_speed_rad)
-                    final_angular_deg = np.rad2deg(clipped_angular_z_rad)
+                    # 将最终角速度转换为度/秒用于打印
+                    final_angular_deg = np.rad2deg(final_angular_z_rad)
                     
                     # 找到并绘制胡萝卜点
                     if final_right_border[anchor_y] != -1:
@@ -292,11 +314,11 @@ class LineFollowerNode:
                             cv2.drawMarker(roi_display, (carrot_x, anchor_y), 
                                          (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
                 
-                    # 按指定频率打印error、steering_angle和最终角速度
+                    # 按指定频率打印error、线速度和角速度
                     current_time = time.time()
                     if current_time - self.last_print_time >= 1.0 / PRINT_HZ:
-                        rospy.loginfo("Error: %7.2f pixels | PID Output: %7.2f | Angular Speed: %7.2f deg/s", 
-                                    error, steering_angle, final_angular_deg)
+                        rospy.loginfo("Error: %7.2f | Linear_x: %.2f | Angular_z: %7.2f deg/s", 
+                                    error, final_linear_x, final_angular_deg)
                         self.last_print_time = current_time
         
         # 发布调试图像
