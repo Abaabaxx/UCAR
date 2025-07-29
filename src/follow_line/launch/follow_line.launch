@@ -1,0 +1,13 @@
+<launch>
+    <!-- 导航模块 -->
+    <include file="$(find ucar_nav)/launch/base_ekf.launch" />
+
+    <!-- 自适应蒙特卡洛定位 (AMCL) -->
+    <include file="$(find ucar_nav)/config/amcl_test/amcl_origin.launch" />
+    
+    <!-- USB摄像头模块 -->
+    <include file="$(find lby_usb_cam)/launch/usb_cam_noimg_10hz.launch" />   
+
+    <!-- 巡线节点 -->
+    <node pkg="follow_line" type="follow_line_show.py" name="line_follower_node" output="screen" />
+</launch>

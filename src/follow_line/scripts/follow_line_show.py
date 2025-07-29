@@ -6,8 +6,18 @@ import numpy as np
 import rospy
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
+from std_srvs.srv import SetBool, SetBoolResponse
 import time
+'''
+可视化
+rqt_image_view /line_follower/debug_image
 
+启动巡线算法
+rosservice call /follow_line/run "data: true"
+
+停止巡线算法
+rosservice call /follow_line/run "data: false"
+'''
 # --- 参数配置区 ---
 # ROS话题参数
 IMAGE_TOPIC = "/usb_cam/image_raw"
@@ -108,6 +118,9 @@ def extract_final_border(image_height, raw_points):
 
 class LineFollowerNode:
     def __init__(self):
+        # 初始化运行状态
+        self.is_running = False
+        
         # 初始化cv_bridge
         self.bridge = CvBridge()
         
@@ -127,12 +140,37 @@ class LineFollowerNode:
         self.image_sub = rospy.Subscriber(IMAGE_TOPIC, Image, self.image_callback)
         # 创建调试图像发布者
         self.debug_image_pub = rospy.Publisher(DEBUG_IMAGE_TOPIC, Image, queue_size=1)
+        
+        # 创建运行状态控制服务
+        self.run_service = rospy.Service('/follow_line/run', SetBool, self.handle_set_running)
+        
         rospy.loginfo("已创建图像订阅者和调试图像发布者，等待图像数据...")
+
+    def handle_set_running(self, request):
+        """
+        处理运行状态切换请求
+        """
+        self.is_running = request.data
+        response = SetBoolResponse()
+        response.success = True
+        response.message = "Running state set to: {}".format(self.is_running)
+        return response
 
     def image_callback(self, data):
         try:
             # 将ROS图像消息转换为OpenCV格式
             frame = self.bridge.imgmsg_to_cv2(data, "bgr8")
+            
+            # 检查是否处于运行状态
+            if not self.is_running:
+                # 如果未运行，仍然发布原始图像用于调试
+                try:
+                    debug_img_msg = self.bridge.cv2_to_imgmsg(frame, "bgr8")
+                    self.debug_image_pub.publish(debug_img_msg)
+                except CvBridgeError as e:
+                    rospy.logerr("调试图像转换或发布错误: %s", str(e))
+                return
+                
         except CvBridgeError as e:
             rospy.logerr("图像转换错误: %s", str(e))
             return

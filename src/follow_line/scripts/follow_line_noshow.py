@@ -1,13 +1,19 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
 import cv2
 import numpy as np
 import rospy
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
+from std_srvs.srv import SetBool, SetBoolResponse
 import time
+'''
+启动巡线算法
+rosservice call /follow_line/run "data: true"
 
+停止巡线算法
+rosservice call /follow_line/run "data: false"
+'''
 # --- 参数配置区 ---
 # ROS话题参数
 IMAGE_TOPIC = "/usb_cam/image_raw"
@@ -107,6 +113,9 @@ def extract_final_border(image_height, raw_points):
 
 class LineFollowerNode:
     def __init__(self):
+        # 初始化运行状态
+        self.is_running = False
+        
         # 初始化cv_bridge
         self.bridge = CvBridge()
         
@@ -124,9 +133,27 @@ class LineFollowerNode:
         
         # 创建图像订阅者
         self.image_sub = rospy.Subscriber(IMAGE_TOPIC, Image, self.image_callback)
+        
+        # 创建运行状态控制服务
+        self.run_service = rospy.Service('/follow_line/run', SetBool, self.handle_set_running)
+        
         rospy.loginfo("已创建图像订阅者，等待图像数据...")
 
+    def handle_set_running(self, request):
+        """
+        处理运行状态切换请求
+        """
+        self.is_running = request.data
+        response = SetBoolResponse()
+        response.success = True
+        response.message = "Running state set to: {}".format(self.is_running)
+        return response
+
     def image_callback(self, data):
+        # 检查是否处于运行状态
+        if not self.is_running:
+            return
+            
         try:
             # 将ROS图像消息转换为OpenCV格式
             frame = self.bridge.imgmsg_to_cv2(data, "bgr8")
