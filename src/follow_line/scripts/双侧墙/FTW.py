@@ -42,7 +42,7 @@ START_POINT_SCAN_STEP = 10  # 向上扫描的步长（像素）
 LOOKAHEAD_DISTANCE = 10  # 胡萝卜点与基准点的距离（像素）
 PRINT_HZ = 4  # 打印error的频率（次/秒）
 # 路径规划参数
-CENTER_LINE_OFFSET_BASE = 47  # 基础偏移像素数（正值）
+CENTER_LINE_OFFSET = -47  # 从右边线向左偏移的像素数
 # PID控制器参数
 Kp = 0.6  # 比例系数
 Ki = 0.0   # 积分系数
@@ -68,23 +68,12 @@ IPM_ROI_X = 0    # ROI起始X坐标
 IPM_ROI_W = 640  # ROI宽度
 
 # 特殊区域检测参数
-NORMAL_AREA_HEIGHT_FROM_BOTTOM = 30  # 从ROI底部算起，被视为"常规"的区域高度（像素）
+NORMAL_AREA_HEIGHT_FROM_BOTTOM = 50  # 从ROI底部算起，被视为"常规"的区域高度（像素）
 CONSECUTIVE_FRAMES_FOR_DETECTION = 3  # 连续可疑帧数，达到此值则确认进入
 
 # 定义沿墙走的搜索模式（Follow The Wall）
-# 逆时针搜索，用于沿着左侧赛道内边界行走
-FTW_SEEDS_LEFT = [
-    (0, 1),     # 下
-    (1, 1),     # 右下
-    (1, 0),     # 右
-    (1, -1),    # 右上
-    (0, -1),    # 上
-    (-1, -1),   # 左上
-    (-1, 0),    # 左
-    (-1, 1)     # 左下
-]
 # 顺时针搜索，用于沿着右侧赛道内边界行走
-FTW_SEEDS_RIGHT = [
+FTW_SEEDS = [
     (-1, 0),    # 左
     (-1, -1),   # 左上
     (0, -1),    # 上
@@ -278,25 +267,14 @@ class LineFollowerNode:
         start_point = None
         current_scan_y = None
 
-        # 根据当前状态决定扫描哪一侧的墙
-        scan_for_left_wall = (self.current_state == STATE_TRANSITION_STRAIGHT)
-
-        # 从底部开始，每隔START_POINT_SCAN_STEP个像素向上扫描，寻找边线起始点
+        # 从底部开始，每隔START_POINT_SCAN_STEP个像素向上扫描，寻找右边线起始点
         for y in range(roi_h - 1, 0, -START_POINT_SCAN_STEP):
-            if not scan_for_left_wall:  # 扫描右墙
-                # 从中心向右扫描寻找右边线的内侧起始点
-                for x in range(center_x, roi_w - 1):
-                    if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x + 1] == 255:
-                        start_point = (x + 1, y)
-                        current_scan_y = y
-                        break
-            else:  # 扫描左墙
-                # 从中心向左扫描寻找左边线的内侧起始点
-                for x in range(center_x, 0, -1):
-                    if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x - 1] == 255:
-                        start_point = (x - 1, y)
-                        current_scan_y = y
-                        break
+            # 从中心向右扫描寻找右边线的内侧起始点
+            for x in range(center_x, roi_w - 1):
+                if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x + 1] == 255:
+                    start_point = (x + 1, y)
+                    current_scan_y = y
+                    break
             
             if start_point is not None:
                 break
@@ -331,7 +309,7 @@ class LineFollowerNode:
                 else:
                     # 2. 如果不转换，执行本状态的行为（PID巡右墙）
                     # 使用沿墙走算法寻找右边界
-                    points = follow_the_wall(binary_roi_frame, start_point, FTW_SEEDS_RIGHT)
+                    points = follow_the_wall(binary_roi_frame, start_point, FTW_SEEDS)
                     
                     # 提取最终的右边线
                     final_border = None
@@ -349,7 +327,7 @@ class LineFollowerNode:
                         for y, x in enumerate(final_border):
                             if anchor_y <= y <= base_y and x != -1:
                                 # 计算中心线点
-                                center_x = x - CENTER_LINE_OFFSET_BASE
+                                center_x = x + CENTER_LINE_OFFSET
                                 if 0 <= center_x < roi_w:
                                     roi_points.append((center_x, y))
                                     # 绘制区域内的中心线点（青色）
@@ -405,7 +383,7 @@ class LineFollowerNode:
                             
                             # 找到并绘制胡萝卜点
                             if final_border[anchor_y] != -1:
-                                carrot_x = final_border[anchor_y] - CENTER_LINE_OFFSET_BASE
+                                carrot_x = final_border[anchor_y] + CENTER_LINE_OFFSET
                                 if 0 <= carrot_x < roi_w:
                                     cv2.drawMarker(roi_display, (carrot_x, anchor_y), 
                                                  (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
@@ -426,15 +404,15 @@ class LineFollowerNode:
                 twist_msg.angular.z = 0.0
                 self.cmd_vel_pub.publish(twist_msg)
 
-                # 2. 检查状态转换条件（左侧边线是否靠近底部）
+                # 2. 检查状态转换条件（右侧边线是否靠近底部）
                 transition_y_threshold = roi_h - 10
                 if start_point[1] > transition_y_threshold:
                     rospy.loginfo("状态转换: TRANSITION_STRAIGHT -> FINAL_STOP")
                     self.current_state = STATE_FINAL_STOP
                     self.stop()  # 立即停止
                 
-                # 可视化：绘制左侧边线
-                points = follow_the_wall(binary_roi_frame, start_point, FTW_SEEDS_LEFT)
+                # 可视化：绘制右侧边线
+                points = follow_the_wall(binary_roi_frame, start_point, FTW_SEEDS)
                 if points:
                     for point in points:
                         cv2.circle(roi_display, point, 1, (0, 255, 255), -1)
