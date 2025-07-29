@@ -7,6 +7,7 @@ import rospy
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from std_srvs.srv import SetBool, SetBoolResponse
+from collections import Counter
 import time
 '''
 可视化
@@ -154,6 +155,27 @@ class LineFollowerNode:
         
         rospy.loginfo("已创建图像订阅者和调试图像发布者，等待图像数据...")
 
+    def calculate_overlap_rate(self, planned_x_coords):
+        """
+        计算路径中重合点的比例，并直接返回这个比率
+        """
+        total_points_in_path = len(planned_x_coords)
+        
+        # 如果路径点太少，则返回0.0表示无重合
+        if total_points_in_path < 20:
+            return 0.0
+        
+        x_counts = Counter(planned_x_coords)
+        
+        num_overlapping_points = 0
+        for count in x_counts.values():
+            if count > 1:
+                num_overlapping_points += count
+                
+        overlap_rate = float(num_overlapping_points) / total_points_in_path
+        
+        return overlap_rate
+
     def handle_set_running(self, request):
         """
         处理运行状态切换请求
@@ -250,39 +272,41 @@ class LineFollowerNode:
             
             # 如果成功提取到右边线，计算error
             if final_right_border is not None:
+                # --- 1. 生成唯一的、正确的“规划路径”点集 (40像素范围) ---
                 # 确定基准点和锚点行
                 base_y = right_start_point[1]
                 anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
-                
+
                 # 收集目标区域内的点
-                roi_points = []
+                planned_path_points = [] # 使用一个更清晰的命名
                 for y, x in enumerate(final_right_border):
                     if anchor_y <= y <= base_y and x != -1:
-                        # 计算中心线点
                         center_x = x + CENTER_LINE_OFFSET
                         if 0 <= center_x < roi_w:
-                            roi_points.append((center_x, y))
-                            # 绘制区域内的中心线点（青色）
+                            planned_path_points.append((center_x, y))
                             cv2.circle(roi_display, (center_x, y), 2, (255, 255, 0), -1)
-                
-                # 计算error
+
+                # --- 2. 基于“规划路径”进行所有分析 ---
+                # 初始化所有将要计算的变量
                 error = 0.0
-                if roi_points:
-                    avg_x = sum(p[0] for p in roi_points) / len(roi_points)
+                final_linear_x = 0.0
+                final_angular_deg = 0.0
+                overlap_rate = 0.0 # 初始化重合率
+
+                if planned_path_points:
+                    # --- 2a. 计算重合率 ---
+                    # 从规划路径点集中提取X坐标
+                    planned_x_coords = [p[0] for p in planned_path_points]
+                    overlap_rate = self.calculate_overlap_rate(planned_x_coords)
+                    
+                    # --- 2b. 计算Error ---
+                    avg_x = sum(planned_x_coords) / len(planned_path_points)
                     error = avg_x - (roi_w // 2)
                     
-                    # --- 新的状态机逻辑 ---
-                    # 初始化最终速度变量
-                    final_linear_x = 0.0
+                    # --- 2c. 执行PID停-转-走逻辑 ---
                     final_angular_z_rad = 0.0
-
-                    # 检查误差是否超出死区
                     if abs(error) > ERROR_DEADZONE_PIXELS:
-                        # 状态：原地旋转以修正方向
-                        # 线速度为0，只计算角速度
                         final_linear_x = 0.0
-                        
-                        # 计算PID控制器的输出
                         p_term = Kp * error
                         self.integral += error
                         i_term = Ki * self.integral
@@ -290,36 +314,27 @@ class LineFollowerNode:
                         d_term = Kd * derivative
                         self.last_error = error
                         steering_angle = p_term + i_term + d_term
-                        
-                        # 计算角速度并进行限幅
                         angular_z_rad = -1 * steering_angle * STEERING_TO_ANGULAR_VEL_RATIO
                         final_angular_z_rad = np.clip(angular_z_rad, -self.max_angular_speed_rad, self.max_angular_speed_rad)
-                    
                     else:
-                        # 状态：方向正确，直线前进
-                        # 角速度为0，只给定线速度
                         final_linear_x = LINEAR_SPEED
                         final_angular_z_rad = 0.0
-                        # 重置PID积分项和last_error，为下一次需要转向时做准备
-                        self.integral = 0.0
-                        self.last_error = 0.0
+                        self.integral, self.last_error = 0.0, 0.0
                     
-                    # 将最终角速度转换为度/秒用于打印
                     final_angular_deg = np.rad2deg(final_angular_z_rad)
                     
-                    # 找到并绘制胡萝卜点
+                    # --- 2d. 绘制胡萝卜点 ---
                     if final_right_border[anchor_y] != -1:
                         carrot_x = final_right_border[anchor_y] + CENTER_LINE_OFFSET
                         if 0 <= carrot_x < roi_w:
-                            cv2.drawMarker(roi_display, (carrot_x, anchor_y), 
-                                         (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
-                
-                    # 按指定频率打印error、线速度和角速度
-                    current_time = time.time()
-                    if current_time - self.last_print_time >= 1.0 / PRINT_HZ:
-                        rospy.loginfo("Error: %7.2f | Linear_x: %.2f | Angular_z: %7.2f deg/s", 
-                                    error, final_linear_x, final_angular_deg)
-                        self.last_print_time = current_time
+                            cv2.drawMarker(roi_display, (carrot_x, anchor_y), (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
+
+                # --- 3. 统一日志输出 ---
+                current_time = time.time()
+                if current_time - self.last_print_time >= 1.0 / PRINT_HZ:
+                    rospy.loginfo("Error: %7.2f | Linear_x: %.2f | Angular_z: %7.2f deg/s | Overlap: %.2f", 
+                                error, final_linear_x, final_angular_deg, overlap_rate)
+                    self.last_print_time = current_time
         
         # 发布调试图像
         try:
