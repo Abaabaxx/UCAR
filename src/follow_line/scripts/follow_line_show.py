@@ -43,7 +43,7 @@ Kp = 0.6  # 比例系数
 Ki = 0.0   # 积分系数
 Kd = 1   # 微分系数
 # 速度控制参数
-LINEAR_SPEED = 0.2  # 前进速度 (m/s)
+LINEAR_SPEED = 0.12  # 前进速度 (m/s)
 ERROR_DEADZONE_PIXELS = 15  # 误差死区（像素），低于此值则认为方向正确
 STEERING_TO_ANGULAR_VEL_RATIO = 0.02  # 转向角到角速度的转换系数
 MAX_ANGULAR_SPEED_DEG = 15.0  # 最大角速度（度/秒）
