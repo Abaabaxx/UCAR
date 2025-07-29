@@ -4,11 +4,11 @@
 
     <!-- 加载机器人URDF模型描述 -->
     <param name="robot_description" textfile="$(find ucar_nav)/urdf/xfcar.urdf" />
+    
     <!-- 机器人状态发布 -->
-
     <node pkg="joint_state_publisher" name="joint_state_publisher" type="joint_state_publisher" />
     <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" />
-    <!-- USB摄像头模块 -->
     
-    <include file="$(find lby_usb_cam)/launch/usb_cam_noimg_10hz.launch" />   
+    <!-- USB摄像头模块 -->
+    <include file="$(find lby_usb_cam)/launch/usb_cam_noimg.launch" />   
 </launch>

@@ -1,13 +1,17 @@
 <launch>
-    <!-- 导航模块 -->
-    <include file="$(find ucar_nav)/launch/base_ekf.launch" />
+    <!-- 底盘驱动 -->
+    <include file="$(find ucar_controller)/launch/base_driver_ekf.launch" />
 
-    <!-- 自适应蒙特卡洛定位 (AMCL) -->
-    <include file="$(find ucar_nav)/config/amcl_test/amcl_origin.launch" />
+    <!-- 加载机器人URDF模型描述 -->
+    <param name="robot_description" textfile="$(find ucar_nav)/urdf/xfcar.urdf" />
+    
+    <!-- 机器人状态发布 -->
+    <node pkg="joint_state_publisher" name="joint_state_publisher" type="joint_state_publisher" />
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" />
     
     <!-- USB摄像头模块 -->
-    <include file="$(find lby_usb_cam)/launch/usb_cam_noimg_10hz.launch" />   
+    <include file="$(find lby_usb_cam)/launch/usb_cam_noimg.launch" />  
 
     <!-- 巡线节点 -->
-    <node pkg="follow_line" type="follow_line_show.py" name="line_follower_node" output="screen" />
+    <node pkg="follow_line" type="follow_line_show.py" name="line_follower_node" output="screen" /> 
 </launch>
