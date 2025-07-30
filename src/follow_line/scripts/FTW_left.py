@@ -31,6 +31,15 @@ ROTATE_ALIGNMENT = 2      # 状态三：原地转向对准
 FOLLOW_LEFT_WITH_AVOIDANCE = 3 # 状态四：带避障巡线
 AVOIDANCE_MANEUVER = 4    # 状态五：执行避障机动
 
+# 状态名称映射（用于日志输出）
+STATE_NAMES = {
+    FOLLOW_LEFT: "FOLLOW_LEFT",
+    STRAIGHT_TRANSITION: "STRAIGHT_TRANSITION",
+    ROTATE_ALIGNMENT: "ROTATE_ALIGNMENT",
+    FOLLOW_LEFT_WITH_AVOIDANCE: "FOLLOW_LEFT_WITH_AVOIDANCE",
+    AVOIDANCE_MANEUVER: "AVOIDANCE_MANEUVER"
+}
+
 # ROS话题参数
 IMAGE_TOPIC = "/usb_cam/image_raw"
 DEBUG_IMAGE_TOPIC = "/line_follower/debug_image"  # 新增：调试图像发布话题
@@ -63,6 +72,7 @@ MAX_ANGULAR_SPEED_DEG = 15.0  # 最大角速度（度/秒）
 # 原地转向对准状态参数
 ROTATE_ALIGNMENT_SPEED_DEG = 7.0 # 固定的原地左转角速度 (度/秒, 正值为左转)
 ROTATE_ALIGNMENT_ERROR_THRESHOLD = 15 # 退出转向状态的像素误差阈值
+LINE_SEARCH_ROTATION_SPEED_DEG = 7.0 # 丢线后原地向左旋转搜索的速度 (度/秒)
 # 激光雷达板子垂直度检测参数 (用于ROTATE_ALIGNMENT状态)
 BOARD_DETECT_ANGLE_DEG = 45.0      # 扫描前方 +/- 这么多度
 BOARD_DETECT_MIN_DIST_M = 0.3      # 考虑的最小距离
@@ -80,7 +90,7 @@ AVOIDANCE_POINT_THRESHOLD = 20                         # 触发避障的点数�
 # 避障机动参数
 ODOM_TOPIC = "/odom"                                   # 里程计话题
 AVOIDANCE_STRAFE_DISTANCE_M = 0.5                      # 避障-平移距离 (米)
-AVOIDANCE_FORWARD_DISTANCE_M = 0.5                     # 避障-前进距离 (米)
+AVOIDANCE_FORWARD_DISTANCE_M = 0.58                     # 避障-前进距离 (米)
 AVOIDANCE_STRAFE_SPEED_MPS = 0.15                       # 避障-平移速度 (米/秒)
 AVOIDANCE_FORWARD_SPEED_MPS = 0.15                      # 避障-前进速度 (米/秒)
 # 逆透视变换矩阵（从鸟瞰图坐标到原始图像坐标的映射）
@@ -218,6 +228,9 @@ class LineFollowerNode:
         
         # 将原地转向角速度从度转换为弧度
         self.rotate_alignment_speed_rad = np.deg2rad(ROTATE_ALIGNMENT_SPEED_DEG)
+        
+        # 将丢线搜索角速度从度转换为弧度
+        self.line_search_rotation_speed_rad = np.deg2rad(LINE_SEARCH_ROTATION_SPEED_DEG)
         
         # 计算正向透视变换矩阵
         try:
@@ -649,20 +662,31 @@ class LineFollowerNode:
                     self.maneuver_initial_pose = None
                     return
 
-            # 状态执行逻辑
-            if not is_line_found and self.current_state != ROTATE_ALIGNMENT:
-                self.stop()
-            elif self.current_state == FOLLOW_LEFT or self.current_state == FOLLOW_LEFT_WITH_AVOIDANCE:
+            # 状态执行逻辑 - 首先，根据当前状态确定默认的twist_msg (假设总能找到线)
+            if self.current_state == FOLLOW_LEFT or self.current_state == FOLLOW_LEFT_WITH_AVOIDANCE:
                 # PID巡线逻辑
-                self._execute_line_following_logic_in_main_loop(vision_error, twist_msg)
+                if is_line_found:
+                    self._execute_line_following_logic_in_main_loop(vision_error, twist_msg)
+                
             elif self.current_state == STRAIGHT_TRANSITION:
-                rospy.loginfo_throttle(1, "当前状态: STRAIGHT_TRANSITION, 正在直行...")
-                twist_msg.linear.x = LINEAR_SPEED
-                twist_msg.angular.z = 0.0
+                if is_line_found:
+                    rospy.loginfo_throttle(1, "状态: %s | 正在直行...", STATE_NAMES[self.current_state])
+                    twist_msg.linear.x = LINEAR_SPEED
+                    twist_msg.angular.z = 0.0
+                
             elif self.current_state == ROTATE_ALIGNMENT:
                 twist_msg.linear.x = 0.0
                 twist_msg.angular.z = self.rotate_alignment_speed_rad
             
+            # 然后，作为最后一步，检查是否丢失了线，并覆盖上面的指令
+            if not is_line_found:
+                # 只有在需要巡线的状态下才旋转搜索
+                if self.current_state in [FOLLOW_LEFT, FOLLOW_LEFT_WITH_AVOIDANCE, STRAIGHT_TRANSITION]:
+                    rospy.loginfo_throttle(1, "状态: %s | 丢线，开始原地旋转搜索...", STATE_NAMES[self.current_state])
+                    twist_msg.linear.x = 0.0
+                    twist_msg.angular.z = self.line_search_rotation_speed_rad
+            
+            # 最后发布最终确定的指令
             self.cmd_vel_pub.publish(twist_msg)
 
         # --- 3. 发布调试图像 ---
@@ -679,7 +703,7 @@ class LineFollowerNode:
         # 检查是否在死区内外发生切换，如果是则刹车
         is_in_deadzone = abs(vision_error) <= ERROR_DEADZONE_PIXELS
         if self.was_in_deadzone is not None and self.was_in_deadzone != is_in_deadzone:
-            rospy.loginfo("状态 %s: 切换行驶模式(直行/转向)，刹车...", str(self.current_state))
+            rospy.loginfo("状态: %s | 切换行驶模式(直行/转向)，刹车...", STATE_NAMES[self.current_state])
             self.stop()
         self.was_in_deadzone = is_in_deadzone
 
@@ -714,7 +738,7 @@ class LineFollowerNode:
         if current_time - self.last_print_time >= 1.0 / PRINT_HZ:
             final_angular_deg = np.rad2deg(twist_msg.angular.z)
             rospy.loginfo("状态: %s | Error: %7.2f | Linear_x: %.2f | Angular_z: %7.2f deg/s", 
-                        str(self.current_state), vision_error, twist_msg.linear.x, final_angular_deg)
+                        STATE_NAMES[self.current_state], vision_error, twist_msg.linear.x, final_angular_deg)
             self.last_print_time = current_time
 
 if __name__ == '__main__':
