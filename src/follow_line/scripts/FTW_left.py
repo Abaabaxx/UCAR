@@ -8,6 +8,7 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from std_srvs.srv import SetBool, SetBoolResponse
 from geometry_msgs.msg import Twist
+from sensor_msgs.msg import LaserScan
 import time
 '''
 可视化
@@ -24,6 +25,7 @@ rosservice call /follow_line/run "data: false"
 FOLLOW_LEFT = 0          # 状态一：沿左墙巡线
 STRAIGHT_TRANSITION = 1   # 状态二：直行过渡
 ROTATE_ALIGNMENT = 2      # 状态三：原地转向对准
+FOLLOW_LEFT_WITH_AVOIDANCE = 3 # 状态四：带避障巡线
 
 # ROS话题参数
 IMAGE_TOPIC = "/usb_cam/image_raw"
@@ -56,6 +58,11 @@ MAX_ANGULAR_SPEED_DEG = 15.0  # 最大角速度（度/秒）
 # 原地转向对准状态参数
 ROTATE_ALIGNMENT_SPEED_DEG = 7.0 # 固定的原地左转角速度 (度/秒, 正值为左转)
 ROTATE_ALIGNMENT_ERROR_THRESHOLD = 15 # 退出转向状态的像素误差阈值
+# 激光雷达避障参数
+LIDAR_TOPIC = "/scan"                                  # 激光雷达话题名称
+AVOIDANCE_ANGLE_DEG = 20.0                             # 监控的前方角度范围（正负各20度）
+AVOIDANCE_DISTANCE_M = 0.4                             # 触发避障的距离阈值（米）
+AVOIDANCE_POINT_THRESHOLD = 20                         # 触发避障的点数阈值
 # 逆透视变换矩阵（从鸟瞰图坐标到原始图像坐标的映射）
 INVERSE_PERSPECTIVE_MATRIX = np.array([
     [-3.365493,  2.608984, -357.317062],
@@ -157,6 +164,9 @@ class LineFollowerNode:
         # 初始化PID内部状态跟踪变量
         self.was_in_deadzone = None # 用于跟踪上一帧是否在PID死区内
         
+        # 初始化避障标志位
+        self.obstacle_detected = False # 避障标志位
+        
         # 初始化cv_bridge
         self.bridge = CvBridge()
         
@@ -183,6 +193,8 @@ class LineFollowerNode:
         
         # 创建图像订阅者
         self.image_sub = rospy.Subscriber(IMAGE_TOPIC, Image, self.image_callback)
+        # 创建激光雷达订阅者
+        self.scan_sub = rospy.Subscriber(LIDAR_TOPIC, LaserScan, self.scan_callback)
         # 创建调试图像发布者
         self.debug_image_pub = rospy.Publisher(DEBUG_IMAGE_TOPIC, Image, queue_size=1)
         # 创建速度指令发布者
@@ -211,6 +223,41 @@ class LineFollowerNode:
         response.success = True
         response.message = "Running state set to: {}".format(self.is_running)
         return response
+
+    def scan_callback(self, msg):
+        """
+        处理激光雷达数据，判断前方是否存在障碍物。
+        """
+        try:
+            # 1. 计算要检查的激光雷达数据点的索引范围
+            # 计算0度（正前方）的索引
+            center_index = int((0.0 - msg.angle_min) / msg.angle_increment)
+            
+            # 计算角度偏移对应的索引数量
+            angle_rad = np.deg2rad(AVOIDANCE_ANGLE_DEG)
+            index_offset = int(angle_rad / msg.angle_increment)
+            
+            # 确定扫描的起始和结束索引
+            start_index = center_index - index_offset
+            end_index = center_index + index_offset
+            
+            # 2. 遍历指定范围内的点，统计满足条件的障碍物点数
+            obstacle_points_count = 0
+            for i in range(start_index, end_index):
+                distance = msg.ranges[i]
+                # 检查距离是否在有效且危险的范围内 (忽略0和inf)
+                if 0 < distance < AVOIDANCE_DISTANCE_M:
+                    obstacle_points_count += 1
+            
+            # 3. 更新障碍物检测标志
+            if obstacle_points_count > AVOIDANCE_POINT_THRESHOLD:
+                self.obstacle_detected = True
+            else:
+                self.obstacle_detected = False
+
+        except Exception as e:
+            rospy.logwarn_throttle(1.0, "scan_callback中发生错误: %s", str(e))
+            self.obstacle_detected = False
 
     def image_callback(self, data):
         try:
@@ -454,11 +501,11 @@ class LineFollowerNode:
                 
                 # 2. 检查是否满足退出条件 (误差足够小)
                 if error_calculated and abs(error) < ROTATE_ALIGNMENT_ERROR_THRESHOLD:
-                    # 对准完成，切换回FOLLOW_LEFT并锁定
-                    rospy.loginfo("状态转换: ROTATE_ALIGNMENT -> FOLLOW_LEFT (locked)")
+                    # 对准完成，切换到最终的带避障巡线状态
+                    rospy.loginfo("状态转换: ROTATE_ALIGNMENT -> FOLLOW_LEFT_WITH_AVOIDANCE")
                     self.realign_cycle_completed = True
-                    self.current_state = FOLLOW_LEFT
-                    self.stop() # 立即停止，让下一帧的FOLLOW_LEFT逻辑接管运动
+                    self.current_state = FOLLOW_LEFT_WITH_AVOIDANCE
+                    self.stop() # 立即停止，让下一帧的逻辑接管运动
                 else:
                     # 未对准或未找到边线，执行或继续执行固定向左旋转
                     rospy.loginfo_throttle(1, "当前状态: ROTATE_ALIGNMENT, 正在向左旋转... Error: %.2f", error)
@@ -475,6 +522,110 @@ class LineFollowerNode:
                     # 在图像上显示当前Y坐标和误差
                     cv2.putText(roi_display, "Y: {0}, Error: {1:.2f}".format(left_start_point[1], error), 
                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            
+            elif self.current_state == FOLLOW_LEFT_WITH_AVOIDANCE:
+                # --- 状态四：带避障巡线 ---
+                # 1. 首先检查是否检测到障碍物
+                if self.obstacle_detected:
+                    rospy.loginfo_throttle(1.0, "检测到障碍物，执行避障停止！")
+                    self.stop()
+                    # 在图像上显示避障状态
+                    cv2.putText(roi_display, "OBSTACLE DETECTED! STOPPING!", 
+                               (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                    return  # 跳过后续的巡线逻辑
+                
+                # 2. 如果没有障碍物，执行与FOLLOW_LEFT相同的巡线逻辑
+                # 使用沿墙走算法寻找左边界
+                points = follow_the_wall(binary_roi_frame, left_start_point)
+                
+                # 提取最终的左边线
+                final_border = None
+                if points:
+                    final_border = extract_final_border(roi_h, points)
+                
+                # 如果成功提取到左边线，计算error
+                if final_border is not None:
+                    # 确定基准点和锚点行
+                    base_y = left_start_point[1]
+                    anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
+                    
+                    # 收集目标区域内的点
+                    roi_points = []
+                    for y, x in enumerate(final_border):
+                        if anchor_y <= y <= base_y and x != -1:
+                            # 计算中心线点
+                            center_x_path = x + CENTER_LINE_OFFSET
+                            if 0 <= center_x_path < roi_w:
+                                roi_points.append((center_x_path, y))
+                                # 绘制区域内的中心线点（青色）
+                                cv2.circle(roi_display, (center_x_path, y), 2, (255, 255, 0), -1)
+                    
+                    # 计算error
+                    error = 0.0
+                    if roi_points:
+                        avg_x = sum(p[0] for p in roi_points) / len(roi_points)
+                        error = avg_x - (roi_w // 2)
+                        
+                        # 【新增刹车逻辑】检查是否在死区内外发生切换，如果是则刹车
+                        is_in_deadzone = abs(error) <= ERROR_DEADZONE_PIXELS
+                        if self.was_in_deadzone is not None and self.was_in_deadzone != is_in_deadzone:
+                            rospy.loginfo("FOLLOW_LEFT_WITH_AVOIDANCE: 切换行驶模式(直行/转向)，刹车...")
+                            self.stop()
+                        self.was_in_deadzone = is_in_deadzone # 更新上一帧的状态
+                        
+                        # --- 原有的PID控制逻辑 ---
+                        # 初始化最终速度变量
+                        final_linear_x = 0.0
+                        final_angular_z_rad = 0.0
+
+                        # 检查误差是否超出死区
+                        if abs(error) > ERROR_DEADZONE_PIXELS:
+                            # 状态：原地旋转以修正方向
+                            final_linear_x = 0.0
+                            
+                            # 计算PID控制器的输出
+                            p_term = Kp * error
+                            self.integral += error
+                            i_term = Ki * self.integral
+                            derivative = error - self.last_error
+                            d_term = Kd * derivative
+                            self.last_error = error
+                            steering_angle = p_term + i_term + d_term
+                            
+                            # 计算角速度并进行限幅
+                            angular_z_rad = -1 * steering_angle * STEERING_TO_ANGULAR_VEL_RATIO
+                            final_angular_z_rad = np.clip(angular_z_rad, -self.max_angular_speed_rad, self.max_angular_speed_rad)
+                        
+                        else:
+                            # 状态：方向正确，直线前进
+                            final_linear_x = LINEAR_SPEED
+                            final_angular_z_rad = 0.0
+                            # 重置PID积分项和last_error
+                            self.integral = 0.0
+                            self.last_error = 0.0
+                        
+                        # 创建并发布速度指令
+                        twist_msg = Twist()
+                        twist_msg.linear.x = final_linear_x
+                        twist_msg.angular.z = final_angular_z_rad
+                        self.cmd_vel_pub.publish(twist_msg)
+                        
+                        # 将最终角速度转换为度/秒用于打印
+                        final_angular_deg = np.rad2deg(final_angular_z_rad)
+                        
+                        # 找到并绘制胡萝卜点
+                        if final_border[anchor_y] != -1:
+                            carrot_x = final_border[anchor_y] + CENTER_LINE_OFFSET
+                            if 0 <= carrot_x < roi_w:
+                                cv2.drawMarker(roi_display, (carrot_x, anchor_y), 
+                                             (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
+                    
+                        # 按指定频率打印error、线速度和角速度
+                        current_time = time.time()
+                        if current_time - self.last_print_time >= 1.0 / PRINT_HZ:
+                            rospy.loginfo("状态: FOLLOW_LEFT_WITH_AVOIDANCE | Error: %7.2f | Linear_x: %.2f | Angular_z: %7.2f deg/s", 
+                                        error, final_linear_x, final_angular_deg)
+                            self.last_print_time = current_time
         else:
             # 如果没有找到起始点，发送停止指令
             self.stop()
