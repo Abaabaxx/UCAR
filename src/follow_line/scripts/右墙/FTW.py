@@ -38,6 +38,7 @@ CANNY_HIGH_THRESHOLD = 150
 PERFORM_HORIZONTAL_FLIP = True  # 是否执行水平翻转
 # 起始点寻找参数
 START_POINT_SCAN_STEP = 10  # 向上扫描的步长（像素）
+HORIZONTAL_SEARCH_OFFSET = -20 # 水平搜索起始点的偏移量(相对于中心, 负为左, 正为右)
 # 胡萝卜点参数
 LOOKAHEAD_DISTANCE = 10  # 胡萝卜点与基准点的距离（像素）
 PRINT_HZ = 4  # 打印error的频率（次/秒）
@@ -265,14 +266,14 @@ class LineFollowerNode:
         roi_h, roi_w = binary_roi_frame.shape[:2]
         
         # 初始化中心点和起始点坐标
-        center_x = roi_w // 2
+        start_search_x = (roi_w // 2) + HORIZONTAL_SEARCH_OFFSET
         start_point = None
         current_scan_y = None
 
         # 从底部开始，每隔START_POINT_SCAN_STEP个像素向上扫描，寻找右边线起始点
         for y in range(roi_h - 1, 0, -START_POINT_SCAN_STEP):
             # 从中心向右扫描寻找右边线的内侧起始点
-            for x in range(center_x, roi_w - 1):
+            for x in range(start_search_x, roi_w - 1):
                 if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x + 1] == 255:
                     start_point = (x + 1, y)
                     current_scan_y = y
