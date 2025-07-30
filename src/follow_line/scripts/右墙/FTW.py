@@ -21,9 +21,9 @@ rosservice call /follow_line/run "data: false"
 '''
 # --- 参数配置区 ---
 # 有限状态机（FSM）状态定义
-STATE_FOLLOW_RIGHT = 0          # 状态一：沿右墙巡线
-STATE_TRANSITION_STRAIGHT = 1   # 状态二：直行过渡
-STATE_FINAL_STOP = 2            # 状态三：最终停止
+FOLLOW_RIGHT = 0          # 状态一：沿右墙巡线
+STRAIGHT_TRANSITION = 1   # 状态二：直行过渡
+ROTATE_ALIGNMENT = 2      # 状态三：原地转向对准
 
 # ROS话题参数
 IMAGE_TOPIC = "/usb_cam/image_raw"
@@ -44,7 +44,7 @@ PRINT_HZ = 4  # 打印error的频率（次/秒）
 # 路径规划参数
 CENTER_LINE_OFFSET = -47  # 从右边线向左偏移的像素数
 # PID控制器参数
-Kp = 0.6  # 比例系数
+Kp = 0.3  # 比例系数
 Ki = 0.0   # 积分系数
 Kd = 0.1   # 微分系数
 # 速度控制参数
@@ -52,6 +52,9 @@ LINEAR_SPEED = 0.1  # 前进速度 (m/s)
 ERROR_DEADZONE_PIXELS = 15  # 误差死区（像素），低于此值则认为方向正确
 STEERING_TO_ANGULAR_VEL_RATIO = 0.02  # 转向角到角速度的转换系数
 MAX_ANGULAR_SPEED_DEG = 15.0  # 最大角速度（度/秒）
+# 原地转向对准状态参数
+ROTATE_ALIGNMENT_SPEED_DEG = -7.0 # 固定的原地右转角速度 (度/秒, 负值为右转)
+ROTATE_ALIGNMENT_ERROR_THRESHOLD = 15 # 退出转向状态的像素误差阈值
 # 逆透视变换矩阵（从鸟瞰图坐标到原始图像坐标的映射）
 INVERSE_PERSPECTIVE_MATRIX = np.array([
     [-3.365493,  2.608984, -357.317062],
@@ -146,7 +149,13 @@ class LineFollowerNode:
         self.is_running = False
         
         # 初始化FSM状态
-        self.current_state = STATE_FOLLOW_RIGHT
+        self.current_state = FOLLOW_RIGHT
+        
+        # 初始化状态机控制标志
+        self.realign_cycle_completed = False
+        
+        # 初始化PID内部状态跟踪变量
+        self.was_in_deadzone = None # 用于跟踪上一帧是否在PID死区内
         
         # 初始化cv_bridge
         self.bridge = CvBridge()
@@ -161,6 +170,9 @@ class LineFollowerNode:
         
         # 将最大角速度从度转换为弧度
         self.max_angular_speed_rad = np.deg2rad(MAX_ANGULAR_SPEED_DEG)
+        
+        # 将原地转向角速度从度转换为弧度
+        self.rotate_alignment_speed_rad = np.deg2rad(ROTATE_ALIGNMENT_SPEED_DEG)
         
         # 计算正向透视变换矩阵
         try:
@@ -180,7 +192,7 @@ class LineFollowerNode:
         self.run_service = rospy.Service('/follow_line/run', SetBool, self.handle_set_running)
         
         rospy.loginfo("已创建图像订阅者和调试图像发布者，等待图像数据...")
-        rospy.loginfo("当前状态: 沿右墙巡线")
+        rospy.loginfo("当前状态: FOLLOW_RIGHT")
 
     def stop(self):
         """发布停止指令"""
@@ -217,16 +229,6 @@ class LineFollowerNode:
                 
         except CvBridgeError as e:
             rospy.logerr("图像转换错误: %s", str(e))
-            return
-            
-        # 如果已进入最终停止状态，则持续发送停止指令并终止后续处理
-        if self.current_state == STATE_FINAL_STOP:
-            self.stop()
-            try:
-                debug_img_msg = self.bridge.cv2_to_imgmsg(frame, "bgr8")
-                self.debug_image_pub.publish(debug_img_msg)
-            except CvBridgeError as e:
-                rospy.logerr("调试图像转换或发布错误: %s", str(e))
             return
             
         # 执行水平翻转（如果启用）
@@ -288,7 +290,7 @@ class LineFollowerNode:
             cv2.circle(roi_display, start_point, 5, (0, 0, 255), -1)
             
             # 根据当前状态执行相应的逻辑
-            if self.current_state == STATE_FOLLOW_RIGHT:
+            if self.current_state == FOLLOW_RIGHT:
                 # --- 状态一：沿右墙巡线 ---
                 # 1. 检查状态转换条件（即检测到特殊区域）
                 start_y = start_point[1]
@@ -298,14 +300,12 @@ class LineFollowerNode:
                 else:
                     self.consecutive_special_frames = 0
 
-                if self.consecutive_special_frames >= CONSECUTIVE_FRAMES_FOR_DETECTION:
-                    rospy.loginfo("状态转换: FOLLOW_RIGHT -> TRANSITION_STRAIGHT")
-                    self.current_state = STATE_TRANSITION_STRAIGHT
-                    # 立即进入直行状态，发布直行指令
-                    twist_msg = Twist()
-                    twist_msg.linear.x = LINEAR_SPEED
-                    twist_msg.angular.z = 0.0
-                    self.cmd_vel_pub.publish(twist_msg)
+                if not self.realign_cycle_completed and self.consecutive_special_frames >= CONSECUTIVE_FRAMES_FOR_DETECTION:
+                    rospy.loginfo("状态转换: FOLLOW_RIGHT -> STRAIGHT_TRANSITION, 刹车...")
+                    self.stop()
+                    self.was_in_deadzone = None # 重置内部状态跟踪器
+                    self.current_state = STRAIGHT_TRANSITION
+                    # 注意：此处删除了原有的速度发布指令，将运动控制权完全交给下一帧
                 else:
                     # 2. 如果不转换，执行本状态的行为（PID巡右墙）
                     # 使用沿墙走算法寻找右边界
@@ -327,11 +327,11 @@ class LineFollowerNode:
                         for y, x in enumerate(final_border):
                             if anchor_y <= y <= base_y and x != -1:
                                 # 计算中心线点
-                                center_x = x + CENTER_LINE_OFFSET
-                                if 0 <= center_x < roi_w:
-                                    roi_points.append((center_x, y))
+                                center_x_path = x + CENTER_LINE_OFFSET
+                                if 0 <= center_x_path < roi_w:
+                                    roi_points.append((center_x_path, y))
                                     # 绘制区域内的中心线点（青色）
-                                    cv2.circle(roi_display, (center_x, y), 2, (255, 255, 0), -1)
+                                    cv2.circle(roi_display, (center_x_path, y), 2, (255, 255, 0), -1)
                         
                         # 计算error
                         error = 0.0
@@ -339,7 +339,14 @@ class LineFollowerNode:
                             avg_x = sum(p[0] for p in roi_points) / len(roi_points)
                             error = avg_x - (roi_w // 2)
                             
-                            # --- 新的状态机逻辑 ---
+                            # 【新增刹车逻辑】检查是否在死区内外发生切换，如果是则刹车
+                            is_in_deadzone = abs(error) <= ERROR_DEADZONE_PIXELS
+                            if self.was_in_deadzone is not None and self.was_in_deadzone != is_in_deadzone:
+                                rospy.loginfo("FOLLOW_RIGHT: 切换行驶模式(直行/转向)，刹车...")
+                                self.stop()
+                            self.was_in_deadzone = is_in_deadzone # 更新上一帧的状态
+                            
+                            # --- 原有的PID控制逻辑 ---
                             # 初始化最终速度变量
                             final_linear_x = 0.0
                             final_angular_z_rad = 0.0
@@ -347,7 +354,6 @@ class LineFollowerNode:
                             # 检查误差是否超出死区
                             if abs(error) > ERROR_DEADZONE_PIXELS:
                                 # 状态：原地旋转以修正方向
-                                # 线速度为0，只计算角速度
                                 final_linear_x = 0.0
                                 
                                 # 计算PID控制器的输出
@@ -365,10 +371,9 @@ class LineFollowerNode:
                             
                             else:
                                 # 状态：方向正确，直线前进
-                                # 角速度为0，只给定线速度
                                 final_linear_x = LINEAR_SPEED
                                 final_angular_z_rad = 0.0
-                                # 重置PID积分项和last_error，为下一次需要转向时做准备
+                                # 重置PID积分项和last_error
                                 self.integral = 0.0
                                 self.last_error = 0.0
                             
@@ -395,21 +400,21 @@ class LineFollowerNode:
                                             error, final_linear_x, final_angular_deg)
                                 self.last_print_time = current_time
 
-            elif self.current_state == STATE_TRANSITION_STRAIGHT:
+            elif self.current_state == STRAIGHT_TRANSITION:
                 # --- 状态二：直行过渡 ---
                 # 1. 执行本状态的行为（保持直行）
-                rospy.loginfo_throttle(1, "当前状态: TRANSITION_STRAIGHT, 正在直行...")
+                rospy.loginfo_throttle(1, "当前状态: STRAIGHT_TRANSITION, 正在直行...")
                 twist_msg = Twist()
                 twist_msg.linear.x = LINEAR_SPEED
                 twist_msg.angular.z = 0.0
                 self.cmd_vel_pub.publish(twist_msg)
 
                 # 2. 检查状态转换条件（右侧边线是否靠近底部）
-                transition_y_threshold = roi_h - 10
+                transition_y_threshold = roi_h - 30
                 if start_point[1] > transition_y_threshold:
-                    rospy.loginfo("状态转换: TRANSITION_STRAIGHT -> FINAL_STOP")
-                    self.current_state = STATE_FINAL_STOP
-                    self.stop()  # 立即停止
+                    rospy.loginfo("直行完成，刹车并准备转向...")
+                    self.stop() # <--- 新增刹车指令
+                    self.current_state = ROTATE_ALIGNMENT
                 
                 # 可视化：绘制右侧边线
                 points = follow_the_wall(binary_roi_frame, start_point, FTW_SEEDS)
@@ -419,6 +424,56 @@ class LineFollowerNode:
                     
                     # 在图像上显示当前Y坐标和阈值
                     cv2.putText(roi_display, "Y: {0}, Threshold: {1}".format(start_point[1], transition_y_threshold), 
+                               (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+            elif self.current_state == ROTATE_ALIGNMENT:
+                # --- 状态三：原地转向对准 ---
+                # 1. 在此状态下，我们必须持续计算误差，以判断何时完成转向
+                points = follow_the_wall(binary_roi_frame, start_point, FTW_SEEDS)
+                error = 0.0
+                error_calculated = False
+
+                if points:
+                    final_border = extract_final_border(roi_h, points)
+                    if final_border is not None:
+                        base_y = start_point[1]
+                        anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
+                        roi_points = []
+                        for y_idx, x_val in enumerate(final_border):
+                            if anchor_y <= y_idx <= base_y and x_val != -1:
+                                center_x_path = x_val + CENTER_LINE_OFFSET
+                                if 0 <= center_x_path < roi_w:
+                                    roi_points.append((center_x_path, y_idx))
+                                    # 绘制区域内的中心线点（青色）
+                                    cv2.circle(roi_display, (center_x_path, y_idx), 2, (255, 255, 0), -1)
+                        
+                        if roi_points:
+                            avg_x = sum(p[0] for p in roi_points) / len(roi_points)
+                            error = avg_x - (roi_w // 2)
+                            error_calculated = True
+                
+                # 2. 检查是否满足退出条件 (误差足够小)
+                if error_calculated and abs(error) < ROTATE_ALIGNMENT_ERROR_THRESHOLD:
+                    # 对准完成，切换回FOLLOW_RIGHT并锁定
+                    rospy.loginfo("状态转换: ROTATE_ALIGNMENT -> FOLLOW_RIGHT (locked)")
+                    self.realign_cycle_completed = True
+                    self.current_state = FOLLOW_RIGHT
+                    self.stop() # 立即停止，让下一帧的FOLLOW_RIGHT逻辑接管运动
+                else:
+                    # 未对准或未找到边线，执行或继续执行固定向右旋转
+                    rospy.loginfo_throttle(1, "当前状态: ROTATE_ALIGNMENT, 正在向右旋转... Error: %.2f", error)
+                    twist_msg = Twist()
+                    twist_msg.linear.x = 0.0
+                    twist_msg.angular.z = self.rotate_alignment_speed_rad
+                    self.cmd_vel_pub.publish(twist_msg)
+                
+                # 可视化：绘制右侧边线
+                if points:
+                    for point in points:
+                        cv2.circle(roi_display, point, 1, (0, 255, 255), -1)
+                    
+                    # 在图像上显示当前Y坐标和误差
+                    cv2.putText(roi_display, "Y: {0}, Error: {1:.2f}".format(start_point[1], error), 
                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         else:
             # 如果没有找到起始点，发送停止指令
