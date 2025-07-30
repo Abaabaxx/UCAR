@@ -62,8 +62,16 @@ STEERING_TO_ANGULAR_VEL_RATIO = 0.02  # 转向角到角速度的转换系数
 MAX_ANGULAR_SPEED_DEG = 15.0  # 最大角速度（度/秒）
 # 原地转向对准状态参数
 ROTATE_ALIGNMENT_SPEED_DEG = 7.0 # 固定的原地左转角速度 (度/秒, 正值为左转)
-ROTATE_ALIGNMENT_ERROR_THRESHOLD = 5 # 退出转向状态的像素误差阈值
-CONSECUTIVE_FRAMES_FOR_ALIGNMENT = 5 # 连续满足条件的帧数阈值
+ROTATE_ALIGNMENT_ERROR_THRESHOLD = 15 # 退出转向状态的像素误差阈值
+# 激光雷达板子垂直度检测参数 (用于ROTATE_ALIGNMENT状态)
+BOARD_DETECT_ANGLE_DEG = 45.0      # 扫描前方 +/- 这么多度
+BOARD_DETECT_MIN_DIST_M = 0.3      # 考虑的最小距离
+BOARD_DETECT_MAX_DIST_M = 2.0      # 考虑的最大距离
+BOARD_DETECT_CLUSTER_TOL_M = 0.05  # 聚类时，点与点之间的最大距离
+BOARD_DETECT_MIN_CLUSTER_PTS = 5   # 一个有效聚类最少的点数
+BOARD_DETECT_MIN_LENGTH_M = 0.4    # 聚成的线段最小长度
+BOARD_DETECT_MAX_LENGTH_M = 0.7    # 聚成的线段最大长度
+BOARD_DETECT_ANGLE_TOL_DEG = 10.0  # 与水平线的最大角度容忍度(越小越垂直)
 # 激光雷达避障参数
 LIDAR_TOPIC = "/scan"                                  # 激光雷达话题名称
 AVOIDANCE_ANGLE_DEG = 20.0                             # 监控的前方角度范围（正负各20度）
@@ -191,8 +199,9 @@ class LineFollowerNode:
         self.line_y_position = 0 # 用于状态转换判断
         self.latest_debug_image = np.zeros((IPM_ROI_H, IPM_ROI_W, 3), dtype=np.uint8)
         
-        # 初始化连续帧计数器
-        self.consecutive_alignment_frames = 0
+        # 初始化板子检测相关状态变量
+        self.is_board_perpendicular = False # 标记是否检测到垂直板子
+        self.initial_alignment_error_sign = 0 # 存储转向对准时初始误差的符号
         
         # 初始化cv_bridge
         self.bridge = CvBridge()
@@ -256,6 +265,116 @@ class LineFollowerNode:
         response.message = "Running state set to: {}".format(self.is_running)
         return response
 
+    def _check_for_perpendicular_board(self, scan_msg):
+        """
+        检测激光雷达前方是否存在垂直的板子。
+        借鉴find_board.py的聚类和拟合思想，但简化为轻量级实时检测。
+        
+        返回: bool - 是否检测到垂直板子
+        """
+        try:
+            # 1. 数据筛选：只考虑前方指定角度和距离范围内的点
+            angle_rad_range = np.deg2rad(BOARD_DETECT_ANGLE_DEG)
+            center_angle = 0.0  # 正前方
+            
+            # 计算角度索引范围
+            center_index = int((center_angle - scan_msg.angle_min) / scan_msg.angle_increment)
+            angle_index_range = int(angle_rad_range / scan_msg.angle_increment)
+            start_index = max(0, center_index - angle_index_range)
+            end_index = min(len(scan_msg.ranges), center_index + angle_index_range)
+            
+            # 提取有效点的坐标
+            points = []
+            for i in range(start_index, end_index):
+                distance = scan_msg.ranges[i]
+                if BOARD_DETECT_MIN_DIST_M <= distance <= BOARD_DETECT_MAX_DIST_M:
+                    angle = scan_msg.angle_min + i * scan_msg.angle_increment
+                    x = distance * np.cos(angle)
+                    y = distance * np.sin(angle)
+                    points.append((x, y))
+            
+            if len(points) < BOARD_DETECT_MIN_CLUSTER_PTS:
+                return False
+            
+            # 2. 简单距离聚类
+            clusters = []
+            current_cluster = []
+            
+            for i, point in enumerate(points):
+                if len(current_cluster) == 0:
+                    current_cluster.append(point)
+                else:
+                    # 计算与前一个点的距离
+                    prev_point = current_cluster[-1]
+                    distance = np.sqrt((point[0] - prev_point[0])**2 + (point[1] - prev_point[1])**2)
+                    
+                    if distance <= BOARD_DETECT_CLUSTER_TOL_M:
+                        current_cluster.append(point)
+                    else:
+                        # 距离太远，开始新聚类
+                        if len(current_cluster) >= BOARD_DETECT_MIN_CLUSTER_PTS:
+                            clusters.append(current_cluster)
+                        current_cluster = [point]
+            
+            # 不要忘记最后一个聚类
+            if len(current_cluster) >= BOARD_DETECT_MIN_CLUSTER_PTS:
+                clusters.append(current_cluster)
+            
+            # 3. 聚类验证和角度检测
+            for cluster in clusters:
+                if len(cluster) < BOARD_DETECT_MIN_CLUSTER_PTS:
+                    continue
+                
+                # 计算聚类长度
+                start_point = np.array(cluster[0])
+                end_point = np.array(cluster[-1])
+                length = np.linalg.norm(end_point - start_point)
+                
+                if not (BOARD_DETECT_MIN_LENGTH_M <= length <= BOARD_DETECT_MAX_LENGTH_M):
+                    continue
+                
+                # 线性拟合并计算角度
+                cluster_array = np.array(cluster)
+                x_coords = cluster_array[:, 0]
+                y_coords = cluster_array[:, 1]
+                
+                # 判断拟合方向
+                x_std = np.std(x_coords)
+                y_std = np.std(y_coords)
+                
+                if x_std < 1e-6:  # 垂直线
+                    angle_deg = 90.0
+                elif y_std < 1e-6:  # 水平线
+                    angle_deg = 0.0
+                else:
+                    if x_std > y_std:
+                        # 拟合 y = mx + c
+                        coeffs = np.polyfit(x_coords, y_coords, 1)
+                        slope = coeffs[0]
+                        angle_rad = np.arctan(slope)
+                    else:
+                        # 拟合 x = my + c
+                        coeffs = np.polyfit(y_coords, x_coords, 1)
+                        slope = coeffs[0]
+                        angle_rad = np.arctan(1.0 / slope) if slope != 0 else np.pi/2
+                    
+                    angle_deg = abs(np.rad2deg(angle_rad))
+                
+                # 检查是否接近水平（垂直于机器人前进方向）
+                # 水平线的角度应该接近0度或180度
+                angle_from_horizontal = min(angle_deg, abs(angle_deg - 180))
+                
+                if angle_from_horizontal <= BOARD_DETECT_ANGLE_TOL_DEG:
+                    rospy.loginfo_throttle(2, "检测到垂直板子: 长度=%.2fm, 角度偏差=%.1f度", 
+                                         length, angle_from_horizontal)
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            rospy.logwarn_throttle(5, "板子检测出错: %s", str(e))
+            return False
+
     def scan_callback(self, msg):
         """
         处理激光雷达数据，判断前方是否存在障碍物。
@@ -286,10 +405,16 @@ class LineFollowerNode:
                 self.obstacle_detected = True
             else:
                 self.obstacle_detected = False
+            
+            # 4. 更新板子垂直度检测标志
+            with self.data_lock:
+                self.is_board_perpendicular = self._check_for_perpendicular_board(msg)
 
         except Exception as e:
             rospy.logwarn_throttle(1.0, "scan_callback中发生错误: %s", str(e))
             self.obstacle_detected = False
+            with self.data_lock:
+                self.is_board_perpendicular = False
 
     def odom_callback(self, msg):
         """
@@ -498,23 +623,32 @@ class LineFollowerNode:
                     rospy.loginfo("直行完成，刹车并准备转向...")
                     self.stop()
                     self.current_state = ROTATE_ALIGNMENT
+                    # 记录进入旋转状态时的初始误差符号
+                    with self.data_lock:
+                        error_for_sign = vision_error if vision_error != 0 else 1.0
+                        self.initial_alignment_error_sign = np.sign(error_for_sign)
                     return
             
             elif self.current_state == ROTATE_ALIGNMENT:
-                if is_line_found and abs(vision_error) < ROTATE_ALIGNMENT_ERROR_THRESHOLD:
-                    self.consecutive_alignment_frames += 1
-                    rospy.loginfo_throttle(1, "当前状态: ROTATE_ALIGNMENT, 正在向左旋转... Error: %.2f (连续帧: %d/%d)", 
-                                         vision_error, self.consecutive_alignment_frames, CONSECUTIVE_FRAMES_FOR_ALIGNMENT)
-                else:
-                    self.consecutive_alignment_frames = 0
-                    rospy.loginfo_throttle(1, "当前状态: ROTATE_ALIGNMENT, 正在向左旋转... Error: %.2f", vision_error)
+                # 视觉条件：检查是否穿越了中心线
+                current_error_sign = np.sign(vision_error)
+                visual_condition_met = (is_line_found and 
+                                        self.initial_alignment_error_sign != 0 and
+                                        current_error_sign != self.initial_alignment_error_sign)
 
-                if self.consecutive_alignment_frames >= CONSECUTIVE_FRAMES_FOR_ALIGNMENT:
-                    rospy.loginfo("状态转换: ROTATE_ALIGNMENT -> FOLLOW_LEFT_WITH_AVOIDANCE")
+                # 雷达条件：从 self.is_board_perpendicular 读取
+                with self.data_lock:
+                    lidar_condition_met = self.is_board_perpendicular
+
+                rospy.loginfo_throttle(1, "状态: ROTATE_ALIGNMENT | 视觉穿越: %s | 雷达垂直: %s | Error: %.2f",
+                                     str(visual_condition_met), str(lidar_condition_met), vision_error)
+
+                # 双重条件判断
+                if visual_condition_met and lidar_condition_met:
+                    rospy.loginfo("状态转换: 视觉穿越且雷达确认垂直，转向完成。")
                     self.realign_cycle_completed = True
                     self.current_state = FOLLOW_LEFT_WITH_AVOIDANCE
                     self.stop()
-                    self.consecutive_alignment_frames = 0  # 重置计数器
                     return
             
             elif self.current_state == FOLLOW_LEFT_WITH_AVOIDANCE:
