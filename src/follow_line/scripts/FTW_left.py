@@ -61,7 +61,8 @@ STEERING_TO_ANGULAR_VEL_RATIO = 0.02  # 转向角到角速度的转换系数
 MAX_ANGULAR_SPEED_DEG = 15.0  # 最大角速度（度/秒）
 # 原地转向对准状态参数
 ROTATE_ALIGNMENT_SPEED_DEG = 7.0 # 固定的原地左转角速度 (度/秒, 正值为左转)
-ROTATE_ALIGNMENT_ERROR_THRESHOLD = 15 # 退出转向状态的像素误差阈值
+ROTATE_ALIGNMENT_ERROR_THRESHOLD = 5 # 退出转向状态的像素误差阈值
+CONSECUTIVE_FRAMES_FOR_ALIGNMENT = 40 # 连续满足条件的帧数阈值
 # 激光雷达避障参数
 LIDAR_TOPIC = "/scan"                                  # 激光雷达话题名称
 AVOIDANCE_ANGLE_DEG = 20.0                             # 监控的前方角度范围（正负各20度）
@@ -71,8 +72,8 @@ AVOIDANCE_POINT_THRESHOLD = 20                         # 触发避障的点数�
 ODOM_TOPIC = "/odom"                                   # 里程计话题
 AVOIDANCE_STRAFE_DISTANCE_M = 0.5                      # 避障-平移距离 (米)
 AVOIDANCE_FORWARD_DISTANCE_M = 0.5                     # 避障-前进距离 (米)
-AVOIDANCE_STRAFE_SPEED_MPS = 0.1                       # 避障-平移速度 (米/秒)
-AVOIDANCE_FORWARD_SPEED_MPS = 0.1                      # 避障-前进速度 (米/秒)
+AVOIDANCE_STRAFE_SPEED_MPS = 0.15                       # 避障-平移速度 (米/秒)
+AVOIDANCE_FORWARD_SPEED_MPS = 0.15                      # 避障-前进速度 (米/秒)
 # 逆透视变换矩阵（从鸟瞰图坐标到原始图像坐标的映射）
 INVERSE_PERSPECTIVE_MATRIX = np.array([
     [-3.365493,  2.608984, -357.317062],
@@ -188,6 +189,9 @@ class LineFollowerNode:
         self.is_line_found = False
         self.line_y_position = 0 # 用于状态转换判断
         self.latest_debug_image = np.zeros((IPM_ROI_H, IPM_ROI_W, 3), dtype=np.uint8)
+        
+        # 初始化连续帧计数器
+        self.consecutive_alignment_frames = 0
         
         # 初始化cv_bridge
         self.bridge = CvBridge()
@@ -496,10 +500,19 @@ class LineFollowerNode:
             
             elif self.current_state == ROTATE_ALIGNMENT:
                 if is_line_found and abs(vision_error) < ROTATE_ALIGNMENT_ERROR_THRESHOLD:
+                    self.consecutive_alignment_frames += 1
+                    rospy.loginfo_throttle(1, "当前状态: ROTATE_ALIGNMENT, 正在向左旋转... Error: %.2f (连续帧: %d/%d)", 
+                                         vision_error, self.consecutive_alignment_frames, CONSECUTIVE_FRAMES_FOR_ALIGNMENT)
+                else:
+                    self.consecutive_alignment_frames = 0
+                    rospy.loginfo_throttle(1, "当前状态: ROTATE_ALIGNMENT, 正在向左旋转... Error: %.2f", vision_error)
+
+                if self.consecutive_alignment_frames >= CONSECUTIVE_FRAMES_FOR_ALIGNMENT:
                     rospy.loginfo("状态转换: ROTATE_ALIGNMENT -> FOLLOW_LEFT_WITH_AVOIDANCE")
                     self.realign_cycle_completed = True
                     self.current_state = FOLLOW_LEFT_WITH_AVOIDANCE
                     self.stop()
+                    self.consecutive_alignment_frames = 0  # 重置计数器
                     return
             
             elif self.current_state == FOLLOW_LEFT_WITH_AVOIDANCE:
@@ -522,7 +535,6 @@ class LineFollowerNode:
                 twist_msg.linear.x = LINEAR_SPEED
                 twist_msg.angular.z = 0.0
             elif self.current_state == ROTATE_ALIGNMENT:
-                rospy.loginfo_throttle(1, "当前状态: ROTATE_ALIGNMENT, 正在向左旋转... Error: %.2f", vision_error)
                 twist_msg.linear.x = 0.0
                 twist_msg.angular.z = self.rotate_alignment_speed_rad
             
