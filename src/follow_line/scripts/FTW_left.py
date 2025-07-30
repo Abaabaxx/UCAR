@@ -45,6 +45,7 @@ PERFORM_HORIZONTAL_FLIP = True  # 是否执行水平翻转
 # 起始点寻找参数
 START_POINT_SCAN_STEP = 10  # 向上扫描的步长（像素）
 HORIZONTAL_SEARCH_OFFSET = 20 # 水平搜索起始点的偏移量(相对于中心, 负为左, 正为右)
+START_POINT_SEARCH_MIN_Y = 120 # 允许寻找起始点的最低Y坐标(从顶部0开始算)
 # 胡萝卜点参数
 LOOKAHEAD_DISTANCE = 10  # 胡萝卜点与基准点的距离（像素）
 PRINT_HZ = 4  # 打印error的频率（次/秒）
@@ -62,7 +63,7 @@ MAX_ANGULAR_SPEED_DEG = 15.0  # 最大角速度（度/秒）
 # 原地转向对准状态参数
 ROTATE_ALIGNMENT_SPEED_DEG = 7.0 # 固定的原地左转角速度 (度/秒, 正值为左转)
 ROTATE_ALIGNMENT_ERROR_THRESHOLD = 5 # 退出转向状态的像素误差阈值
-CONSECUTIVE_FRAMES_FOR_ALIGNMENT = 15 # 连续满足条件的帧数阈值
+CONSECUTIVE_FRAMES_FOR_ALIGNMENT = 5 # 连续满足条件的帧数阈值
 # 激光雷达避障参数
 LIDAR_TOPIC = "/scan"                                  # 激光雷达话题名称
 AVOIDANCE_ANGLE_DEG = 20.0                             # 监控的前方角度范围（正负各20度）
@@ -329,7 +330,8 @@ class LineFollowerNode:
         current_scan_y = None
         
         # 从底部开始，每隔START_POINT_SCAN_STEP个像素向上扫描，寻找左边线起始点
-        for y in range(roi_h - 1, 0, -START_POINT_SCAN_STEP):
+        # 限制最高搜索位置到START_POINT_SEARCH_MIN_Y
+        for y in range(roi_h - 1, START_POINT_SEARCH_MIN_Y, -START_POINT_SCAN_STEP):
             # 从中心向左扫描寻找左边线的内侧起始点
             for x in range(start_search_x, 0, -1):
                 if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x - 1] == 255:
