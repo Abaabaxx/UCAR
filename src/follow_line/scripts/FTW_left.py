@@ -201,7 +201,6 @@ class LineFollowerNode:
         
         # 初始化板子检测相关状态变量
         self.is_board_perpendicular = False # 标记是否检测到垂直板子
-        self.initial_alignment_error_sign = 0 # 存储转向对准时初始误差的符号
         
         # 初始化cv_bridge
         self.bridge = CvBridge()
@@ -623,29 +622,19 @@ class LineFollowerNode:
                     rospy.loginfo("直行完成，刹车并准备转向...")
                     self.stop()
                     self.current_state = ROTATE_ALIGNMENT
-                    # 记录进入旋转状态时的初始误差符号
-                    with self.data_lock:
-                        error_for_sign = vision_error if vision_error != 0 else 1.0
-                        self.initial_alignment_error_sign = np.sign(error_for_sign)
                     return
             
             elif self.current_state == ROTATE_ALIGNMENT:
-                # 视觉条件：检查是否穿越了中心线
-                current_error_sign = np.sign(vision_error)
-                visual_condition_met = (is_line_found and 
-                                        self.initial_alignment_error_sign != 0 and
-                                        current_error_sign != self.initial_alignment_error_sign)
-
                 # 雷达条件：从 self.is_board_perpendicular 读取
                 with self.data_lock:
                     lidar_condition_met = self.is_board_perpendicular
 
-                rospy.loginfo_throttle(1, "状态: ROTATE_ALIGNMENT | 视觉穿越: %s | 雷达垂直: %s | Error: %.2f",
-                                     str(visual_condition_met), str(lidar_condition_met), vision_error)
+                rospy.loginfo_throttle(1, "状态: ROTATE_ALIGNMENT | 等待雷达确认垂直: %s",
+                                     str(lidar_condition_met))
 
-                # 双重条件判断
-                if visual_condition_met and lidar_condition_met:
-                    rospy.loginfo("状态转换: 视觉穿越且雷达确认垂直，转向完成。")
+                # 只依赖雷达条件判断
+                if lidar_condition_met:
+                    rospy.loginfo("状态转换: 雷达确认垂直，转向完成。")
                     self.realign_cycle_completed = True
                     self.current_state = FOLLOW_LEFT_WITH_AVOIDANCE
                     self.stop()
