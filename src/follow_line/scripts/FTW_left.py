@@ -355,97 +355,7 @@ class LineFollowerNode:
                     # 注意：此处删除了原有的速度发布指令，将运动控制权完全交给下一帧
                 else:
                     # 2. 如果不转换，执行本状态的行为（PID巡左墙）
-                    # 使用沿墙走算法寻找左边界
-                    points = follow_the_wall(binary_roi_frame, left_start_point)
-                    
-                    # 提取最终的左边线
-                    final_border = None
-                    if points:
-                        final_border = extract_final_border(roi_h, points)
-                    
-                    # 如果成功提取到左边线，计算error
-                    if final_border is not None:
-                        # 确定基准点和锚点行
-                        base_y = left_start_point[1]
-                        anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
-                        
-                        # 收集目标区域内的点
-                        roi_points = []
-                        for y, x in enumerate(final_border):
-                            if anchor_y <= y <= base_y and x != -1:
-                                # 计算中心线点
-                                center_x_path = x + CENTER_LINE_OFFSET
-                                if 0 <= center_x_path < roi_w:
-                                    roi_points.append((center_x_path, y))
-                                    # 绘制区域内的中心线点（青色）
-                                    cv2.circle(roi_display, (center_x_path, y), 2, (255, 255, 0), -1)
-                        
-                        # 计算error
-                        error = 0.0
-                        if roi_points:
-                            avg_x = sum(p[0] for p in roi_points) / len(roi_points)
-                            error = avg_x - (roi_w // 2)
-                            
-                            # 【新增刹车逻辑】检查是否在死区内外发生切换，如果是则刹车
-                            is_in_deadzone = abs(error) <= ERROR_DEADZONE_PIXELS
-                            if self.was_in_deadzone is not None and self.was_in_deadzone != is_in_deadzone:
-                                rospy.loginfo("FOLLOW_LEFT: 切换行驶模式(直行/转向)，刹车...")
-                                self.stop()
-                            self.was_in_deadzone = is_in_deadzone # 更新上一帧的状态
-                            
-                            # --- 原有的PID控制逻辑 ---
-                            # 初始化最终速度变量
-                            final_linear_x = 0.0
-                            final_angular_z_rad = 0.0
-
-                            # 检查误差是否超出死区
-                            if abs(error) > ERROR_DEADZONE_PIXELS:
-                                # 状态：原地旋转以修正方向
-                                final_linear_x = 0.0
-                                
-                                # 计算PID控制器的输出
-                                p_term = Kp * error
-                                self.integral += error
-                                i_term = Ki * self.integral
-                                derivative = error - self.last_error
-                                d_term = Kd * derivative
-                                self.last_error = error
-                                steering_angle = p_term + i_term + d_term
-                                
-                                # 计算角速度并进行限幅
-                                angular_z_rad = -1 * steering_angle * STEERING_TO_ANGULAR_VEL_RATIO
-                                final_angular_z_rad = np.clip(angular_z_rad, -self.max_angular_speed_rad, self.max_angular_speed_rad)
-                            
-                            else:
-                                # 状态：方向正确，直线前进
-                                final_linear_x = LINEAR_SPEED
-                                final_angular_z_rad = 0.0
-                                # 重置PID积分项和last_error
-                                self.integral = 0.0
-                                self.last_error = 0.0
-                            
-                            # 创建并发布速度指令
-                            twist_msg = Twist()
-                            twist_msg.linear.x = final_linear_x
-                            twist_msg.angular.z = final_angular_z_rad
-                            self.cmd_vel_pub.publish(twist_msg)
-                            
-                            # 将最终角速度转换为度/秒用于打印
-                            final_angular_deg = np.rad2deg(final_angular_z_rad)
-                            
-                            # 找到并绘制胡萝卜点
-                            if final_border[anchor_y] != -1:
-                                carrot_x = final_border[anchor_y] + CENTER_LINE_OFFSET
-                                if 0 <= carrot_x < roi_w:
-                                    cv2.drawMarker(roi_display, (carrot_x, anchor_y), 
-                                                 (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
-                        
-                            # 按指定频率打印error、线速度和角速度
-                            current_time = time.time()
-                            if current_time - self.last_print_time >= 1.0 / PRINT_HZ:
-                                rospy.loginfo("状态: FOLLOW_LEFT | Error: %7.2f | Linear_x: %.2f | Angular_z: %7.2f deg/s", 
-                                            error, final_linear_x, final_angular_deg)
-                                self.last_print_time = current_time
+                    self._execute_line_following_logic(binary_roi_frame, left_start_point, roi_h, roi_w, roi_display)
 
             elif self.current_state == STRAIGHT_TRANSITION:
                 # --- 状态二：直行过渡 ---
@@ -535,97 +445,7 @@ class LineFollowerNode:
                     return  # 跳过后续的巡线逻辑
                 
                 # 2. 如果没有障碍物，执行与FOLLOW_LEFT相同的巡线逻辑
-                # 使用沿墙走算法寻找左边界
-                points = follow_the_wall(binary_roi_frame, left_start_point)
-                
-                # 提取最终的左边线
-                final_border = None
-                if points:
-                    final_border = extract_final_border(roi_h, points)
-                
-                # 如果成功提取到左边线，计算error
-                if final_border is not None:
-                    # 确定基准点和锚点行
-                    base_y = left_start_point[1]
-                    anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
-                    
-                    # 收集目标区域内的点
-                    roi_points = []
-                    for y, x in enumerate(final_border):
-                        if anchor_y <= y <= base_y and x != -1:
-                            # 计算中心线点
-                            center_x_path = x + CENTER_LINE_OFFSET
-                            if 0 <= center_x_path < roi_w:
-                                roi_points.append((center_x_path, y))
-                                # 绘制区域内的中心线点（青色）
-                                cv2.circle(roi_display, (center_x_path, y), 2, (255, 255, 0), -1)
-                    
-                    # 计算error
-                    error = 0.0
-                    if roi_points:
-                        avg_x = sum(p[0] for p in roi_points) / len(roi_points)
-                        error = avg_x - (roi_w // 2)
-                        
-                        # 【新增刹车逻辑】检查是否在死区内外发生切换，如果是则刹车
-                        is_in_deadzone = abs(error) <= ERROR_DEADZONE_PIXELS
-                        if self.was_in_deadzone is not None and self.was_in_deadzone != is_in_deadzone:
-                            rospy.loginfo("FOLLOW_LEFT_WITH_AVOIDANCE: 切换行驶模式(直行/转向)，刹车...")
-                            self.stop()
-                        self.was_in_deadzone = is_in_deadzone # 更新上一帧的状态
-                        
-                        # --- 原有的PID控制逻辑 ---
-                        # 初始化最终速度变量
-                        final_linear_x = 0.0
-                        final_angular_z_rad = 0.0
-
-                        # 检查误差是否超出死区
-                        if abs(error) > ERROR_DEADZONE_PIXELS:
-                            # 状态：原地旋转以修正方向
-                            final_linear_x = 0.0
-                            
-                            # 计算PID控制器的输出
-                            p_term = Kp * error
-                            self.integral += error
-                            i_term = Ki * self.integral
-                            derivative = error - self.last_error
-                            d_term = Kd * derivative
-                            self.last_error = error
-                            steering_angle = p_term + i_term + d_term
-                            
-                            # 计算角速度并进行限幅
-                            angular_z_rad = -1 * steering_angle * STEERING_TO_ANGULAR_VEL_RATIO
-                            final_angular_z_rad = np.clip(angular_z_rad, -self.max_angular_speed_rad, self.max_angular_speed_rad)
-                        
-                        else:
-                            # 状态：方向正确，直线前进
-                            final_linear_x = LINEAR_SPEED
-                            final_angular_z_rad = 0.0
-                            # 重置PID积分项和last_error
-                            self.integral = 0.0
-                            self.last_error = 0.0
-                        
-                        # 创建并发布速度指令
-                        twist_msg = Twist()
-                        twist_msg.linear.x = final_linear_x
-                        twist_msg.angular.z = final_angular_z_rad
-                        self.cmd_vel_pub.publish(twist_msg)
-                        
-                        # 将最终角速度转换为度/秒用于打印
-                        final_angular_deg = np.rad2deg(final_angular_z_rad)
-                        
-                        # 找到并绘制胡萝卜点
-                        if final_border[anchor_y] != -1:
-                            carrot_x = final_border[anchor_y] + CENTER_LINE_OFFSET
-                            if 0 <= carrot_x < roi_w:
-                                cv2.drawMarker(roi_display, (carrot_x, anchor_y), 
-                                             (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
-                    
-                        # 按指定频率打印error、线速度和角速度
-                        current_time = time.time()
-                        if current_time - self.last_print_time >= 1.0 / PRINT_HZ:
-                            rospy.loginfo("状态: FOLLOW_LEFT_WITH_AVOIDANCE | Error: %7.2f | Linear_x: %.2f | Angular_z: %7.2f deg/s", 
-                                        error, final_linear_x, final_angular_deg)
-                            self.last_print_time = current_time
+                self._execute_line_following_logic(binary_roi_frame, left_start_point, roi_h, roi_w, roi_display)
         else:
             # 如果没有找到起始点，发送停止指令
             self.stop()
@@ -636,6 +456,109 @@ class LineFollowerNode:
             self.debug_image_pub.publish(debug_img_msg)
         except CvBridgeError as e:
             rospy.logerr("调试图像转换或发布错误: %s", str(e))
+
+    def _execute_line_following_logic(self, binary_roi_frame, left_start_point, roi_h, roi_w, roi_display):
+        """
+        执行PID巡线的核心逻辑。
+        
+        参数:
+        binary_roi_frame: 二值化后的ROI图像
+        left_start_point: 左边线起始点坐标
+        roi_h: ROI高度
+        roi_w: ROI宽度
+        roi_display: 用于可视化的彩色图像
+        """
+        # 使用沿墙走算法寻找左边界
+        points = follow_the_wall(binary_roi_frame, left_start_point)
+        
+        # 提取最终的左边线
+        final_border = None
+        if points:
+            final_border = extract_final_border(roi_h, points)
+        
+        # 如果成功提取到左边线，计算error
+        if final_border is not None:
+            # 确定基准点和锚点行
+            base_y = left_start_point[1]
+            anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
+            
+            # 收集目标区域内的点
+            roi_points = []
+            for y, x in enumerate(final_border):
+                if anchor_y <= y <= base_y and x != -1:
+                    # 计算中心线点
+                    center_x_path = x + CENTER_LINE_OFFSET
+                    if 0 <= center_x_path < roi_w:
+                        roi_points.append((center_x_path, y))
+                        # 绘制区域内的中心线点（青色）
+                        cv2.circle(roi_display, (center_x_path, y), 2, (255, 255, 0), -1)
+            
+            # 计算error
+            error = 0.0
+            if roi_points:
+                avg_x = sum(p[0] for p in roi_points) / len(roi_points)
+                error = avg_x - (roi_w // 2)
+                
+                # 【新增刹车逻辑】检查是否在死区内外发生切换，如果是则刹车
+                is_in_deadzone = abs(error) <= ERROR_DEADZONE_PIXELS
+                if self.was_in_deadzone is not None and self.was_in_deadzone != is_in_deadzone:
+                    rospy.loginfo("状态 %s: 切换行驶模式(直行/转向)，刹车...", str(self.current_state))
+                    self.stop()
+                self.was_in_deadzone = is_in_deadzone # 更新上一帧的状态
+                
+                # --- 原有的PID控制逻辑 ---
+                # 初始化最终速度变量
+                final_linear_x = 0.0
+                final_angular_z_rad = 0.0
+
+                # 检查误差是否超出死区
+                if abs(error) > ERROR_DEADZONE_PIXELS:
+                    # 状态：原地旋转以修正方向
+                    final_linear_x = 0.0
+                    
+                    # 计算PID控制器的输出
+                    p_term = Kp * error
+                    self.integral += error
+                    i_term = Ki * self.integral
+                    derivative = error - self.last_error
+                    d_term = Kd * derivative
+                    self.last_error = error
+                    steering_angle = p_term + i_term + d_term
+                    
+                    # 计算角速度并进行限幅
+                    angular_z_rad = -1 * steering_angle * STEERING_TO_ANGULAR_VEL_RATIO
+                    final_angular_z_rad = np.clip(angular_z_rad, -self.max_angular_speed_rad, self.max_angular_speed_rad)
+                
+                else:
+                    # 状态：方向正确，直线前进
+                    final_linear_x = LINEAR_SPEED
+                    final_angular_z_rad = 0.0
+                    # 重置PID积分项和last_error
+                    self.integral = 0.0
+                    self.last_error = 0.0
+                
+                # 创建并发布速度指令
+                twist_msg = Twist()
+                twist_msg.linear.x = final_linear_x
+                twist_msg.angular.z = final_angular_z_rad
+                self.cmd_vel_pub.publish(twist_msg)
+                
+                # 将最终角速度转换为度/秒用于打印
+                final_angular_deg = np.rad2deg(final_angular_z_rad)
+                
+                # 找到并绘制胡萝卜点
+                if final_border[anchor_y] != -1:
+                    carrot_x = final_border[anchor_y] + CENTER_LINE_OFFSET
+                    if 0 <= carrot_x < roi_w:
+                        cv2.drawMarker(roi_display, (carrot_x, anchor_y), 
+                                     (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
+            
+                # 按指定频率打印error、线速度和角速度
+                current_time = time.time()
+                if current_time - self.last_print_time >= 1.0 / PRINT_HZ:
+                    rospy.loginfo("状态: %s | Error: %7.2f | Linear_x: %.2f | Angular_z: %7.2f deg/s", 
+                                str(self.current_state), error, final_linear_x, final_angular_deg)
+                    self.last_print_time = current_time
 
 if __name__ == '__main__':
     try:
