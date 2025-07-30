@@ -9,6 +9,8 @@ from cv_bridge import CvBridge, CvBridgeError
 from std_srvs.srv import SetBool, SetBoolResponse
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
+from nav_msgs.msg import Odometry
+import math
 import time
 '''
 可视化
@@ -26,6 +28,7 @@ FOLLOW_LEFT = 0          # 状态一：沿左墙巡线
 STRAIGHT_TRANSITION = 1   # 状态二：直行过渡
 ROTATE_ALIGNMENT = 2      # 状态三：原地转向对准
 FOLLOW_LEFT_WITH_AVOIDANCE = 3 # 状态四：带避障巡线
+AVOIDANCE_MANEUVER = 4    # 状态五：执行避障机动
 
 # ROS话题参数
 IMAGE_TOPIC = "/usb_cam/image_raw"
@@ -63,6 +66,12 @@ LIDAR_TOPIC = "/scan"                                  # 激光雷达话题名�
 AVOIDANCE_ANGLE_DEG = 20.0                             # 监控的前方角度范围（正负各20度）
 AVOIDANCE_DISTANCE_M = 0.4                             # 触发避障的距离阈值（米）
 AVOIDANCE_POINT_THRESHOLD = 20                         # 触发避障的点数阈值
+# 避障机动参数
+ODOM_TOPIC = "/odom"                                   # 里程计话题
+AVOIDANCE_STRAFE_DISTANCE_M = 0.5                      # 避障-平移距离 (米)
+AVOIDANCE_FORWARD_DISTANCE_M = 0.5                     # 避障-前进距离 (米)
+AVOIDANCE_STRAFE_SPEED_MPS = 0.1                       # 避障-平移速度 (米/秒)
+AVOIDANCE_FORWARD_SPEED_MPS = 0.1                      # 避障-前进速度 (米/秒)
 # 逆透视变换矩阵（从鸟瞰图坐标到原始图像坐标的映射）
 INVERSE_PERSPECTIVE_MATRIX = np.array([
     [-3.365493,  2.608984, -357.317062],
@@ -167,6 +176,11 @@ class LineFollowerNode:
         # 初始化避障标志位
         self.obstacle_detected = False # 避障标志位
         
+        # 初始化里程计和避障机动相关的状态变量
+        self.current_pose = None         # 存储当前里程计姿态
+        self.maneuver_initial_pose = None # 存储机动动作开始时的姿态
+        self.maneuver_step = 0           # 标记机动动作的步骤 (0:左移, 1:前进, 2:右移)
+        
         # 初始化cv_bridge
         self.bridge = CvBridge()
         
@@ -195,6 +209,8 @@ class LineFollowerNode:
         self.image_sub = rospy.Subscriber(IMAGE_TOPIC, Image, self.image_callback)
         # 创建激光雷达订阅者
         self.scan_sub = rospy.Subscriber(LIDAR_TOPIC, LaserScan, self.scan_callback)
+        # 创建里程计订阅者
+        self.odom_sub = rospy.Subscriber(ODOM_TOPIC, Odometry, self.odom_callback)
         # 创建调试图像发布者
         self.debug_image_pub = rospy.Publisher(DEBUG_IMAGE_TOPIC, Image, queue_size=1)
         # 创建速度指令发布者
@@ -258,6 +274,12 @@ class LineFollowerNode:
         except Exception as e:
             rospy.logwarn_throttle(1.0, "scan_callback中发生错误: %s", str(e))
             self.obstacle_detected = False
+
+    def odom_callback(self, msg):
+        """
+        处理里程计数据，更新当前机器人姿态。
+        """
+        self.current_pose = msg.pose.pose
 
     def image_callback(self, data):
         try:
@@ -437,15 +459,76 @@ class LineFollowerNode:
                 # --- 状态四：带避障巡线 ---
                 # 1. 首先检查是否检测到障碍物
                 if self.obstacle_detected:
-                    rospy.loginfo_throttle(1.0, "检测到障碍物，执行避障停止！")
-                    self.stop()
-                    # 在图像上显示避障状态
-                    cv2.putText(roi_display, "OBSTACLE DETECTED! STOPPING!", 
-                               (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                    return  # 跳过后续的巡线逻辑
+                    rospy.loginfo("状态转换: FOLLOW_LEFT_WITH_AVOIDANCE -> AVOIDANCE_MANEUVER")
+                    self.stop() # 立即停止，准备执行机动
+                    self.current_state = AVOIDANCE_MANEUVER
+                    self.maneuver_step = 0           # 重置机动步骤
+                    self.maneuver_initial_pose = None# 清除上一次的初始姿态
+                    return # 立即返回，将控制权交给下一帧
                 
                 # 2. 如果没有障碍物，执行与FOLLOW_LEFT相同的巡线逻辑
                 self._execute_line_following_logic(binary_roi_frame, left_start_point, roi_h, roi_w, roi_display)
+                
+            elif self.current_state == AVOIDANCE_MANEUVER:
+                # --- 状态五：执行避障机动 ---
+                # 检查是否已收到里程计数据
+                if self.current_pose is None:
+                    rospy.logwarn_throttle(1.0, "正在等待里程计数据...")
+                    return
+
+                # 如果是新步骤的开始，记录初始姿态
+                if self.maneuver_initial_pose is None:
+                    self.maneuver_initial_pose = self.current_pose
+
+                # 计算从本步骤开始时已移动的距离
+                initial_p = self.maneuver_initial_pose.position
+                current_p = self.current_pose.position
+                distance_moved = math.sqrt(
+                    math.pow(current_p.x - initial_p.x, 2) + 
+                    math.pow(current_p.y - initial_p.y, 2)
+                )
+
+                twist_msg = Twist()
+
+                # 根据当前步骤执行相应动作
+                if self.maneuver_step == 0: # 步骤0: 向左平移
+                    rospy.loginfo_throttle(1.0, "避障步骤0: 向左平移... (%.2f / %.2f m)", distance_moved, AVOIDANCE_STRAFE_DISTANCE_M)
+                    if distance_moved < AVOIDANCE_STRAFE_DISTANCE_M:
+                        twist_msg.linear.y = AVOIDANCE_STRAFE_SPEED_MPS
+                    else:
+                        self.stop()
+                        rospy.loginfo("向左平移完成。")
+                        self.maneuver_step = 1
+                        self.maneuver_initial_pose = None # 重置，为下一步做准备
+                
+                elif self.maneuver_step == 1: # 步骤1: 向前直行
+                    rospy.loginfo_throttle(1.0, "避障步骤1: 向前直行... (%.2f / %.2f m)", distance_moved, AVOIDANCE_FORWARD_DISTANCE_M)
+                    if distance_moved < AVOIDANCE_FORWARD_DISTANCE_M:
+                        twist_msg.linear.x = AVOIDANCE_FORWARD_SPEED_MPS
+                    else:
+                        self.stop()
+                        rospy.loginfo("向前直行完成。")
+                        self.maneuver_step = 2
+                        self.maneuver_initial_pose = None # 重置
+
+                elif self.maneuver_step == 2: # 步骤2: 向右平移
+                    rospy.loginfo_throttle(1.0, "避障步骤2: 向右平移... (%.2f / %.2f m)", distance_moved, AVOIDANCE_STRAFE_DISTANCE_M)
+                    if distance_moved < AVOIDANCE_STRAFE_DISTANCE_M:
+                        twist_msg.linear.y = -AVOIDANCE_STRAFE_SPEED_MPS # 负号表示向右
+                    else:
+                        self.stop()
+                        rospy.loginfo("向右平移完成。避障机动结束。")
+                        # 机动完成，返回带避障的巡线状态
+                        self.current_state = FOLLOW_LEFT_WITH_AVOIDANCE
+                
+                self.cmd_vel_pub.publish(twist_msg)
+                
+                # 在ROI显示区域显示当前避障状态
+                cv2.putText(roi_display, "AVOIDANCE MANEUVER - STEP: {}".format(self.maneuver_step), 
+                           (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                cv2.putText(roi_display, "Distance: {:.2f}/{:.2f}m".format(distance_moved, 
+                           AVOIDANCE_STRAFE_DISTANCE_M if self.maneuver_step != 1 else AVOIDANCE_FORWARD_DISTANCE_M), 
+                           (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         else:
             # 如果没有找到起始点，发送停止指令
             self.stop()
