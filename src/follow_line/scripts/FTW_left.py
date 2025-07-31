@@ -79,13 +79,13 @@ ROTATE_ALIGNMENT_SPEED_DEG = 7.0 # 固定的原地左转角速度 (度/秒, 正�
 ROTATE_ALIGNMENT_ERROR_THRESHOLD = 15 # 退出转向状态的像素误差阈值
 LINE_SEARCH_ROTATION_SPEED_DEG = 7.0 # 丢线后原地向左旋转搜索的速度 (度/秒)
 # 激光雷达板子垂直度检测参数 (用于ROTATE_ALIGNMENT状态)
-BOARD_DETECT_ANGLE_DEG = 90.0      # 扫描前方 +/- 这么多度
+BOARD_DETECT_ANGLE_DEG = 50.0      # 扫描前方 +/- 这么多度
 BOARD_DETECT_MIN_DIST_M = 0.26      # 考虑的最小距离
-BOARD_DETECT_MAX_DIST_M = 0.9      # 考虑的最大距离
+BOARD_DETECT_MAX_DIST_M = 2      # 考虑的最大距离
 BOARD_DETECT_CLUSTER_TOL_M = 0.05  # 聚类时，点与点之间的最大距离
 BOARD_DETECT_MIN_CLUSTER_PTS = 5   # 一个有效聚类最少的点数
 BOARD_DETECT_MIN_LENGTH_M = 0.36    # 聚成的线段最小长度
-BOARD_DETECT_MAX_LENGTH_M = 0.66    # 聚成的线段最大长度
+BOARD_DETECT_MAX_LENGTH_M = 0.62    # 聚成的线段最大长度
 BOARD_DETECT_ANGLE_TOL_DEG = 12.0  # 与水平线的最大角度容忍度(越小越垂直)
 # 激光雷达避障参数
 LIDAR_TOPIC = "/scan"                                  # 激光雷达话题名称
