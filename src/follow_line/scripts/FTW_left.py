@@ -117,8 +117,8 @@ NORMAL_AREA_HEIGHT_FROM_BOTTOM = 50  # 从ROI底部算起，被视为"常规"的
 CONSECUTIVE_FRAMES_FOR_DETECTION = 3  # 连续可疑帧数，达到此值则确认进入
 
 # 停车区域检测参数 (用于FOLLOW_TO_FINISH状态)
-STOP_ZONE_ROI_HEIGHT_PX = 3        # 从图像底部向上计算的窗口高度
-STOP_ZONE_ROI_WIDTH_PX = 30       # 窗口宽度
+STOP_ZONE_ROI_HEIGHT_PX = 8        # 从图像底部向上计算的窗口高度
+STOP_ZONE_ROI_WIDTH_PX = 50       # 窗口宽度
 STOP_ZONE_WHITE_PIXEL_THRESH = 0.60  # 窗口中白色像素的百分比阈值
 STOP_ZONE_CONSECUTIVE_FRAMES = 3     # 连续满足条件的帧数
 
