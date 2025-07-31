@@ -124,7 +124,7 @@ STOP_ZONE_CONSECUTIVE_FRAMES = 3     # 连续满足条件的帧数
 
 # 定义沿墙走的搜索模式（Follow The Wall）
 # 逆时针搜索，用于沿着左侧赛道内边界行走
-FTW_SEEDS = [
+FTW_SEEDS_LEFT = [
     (0, 1),     # 下
     (1, 1),     # 右下
     (1, 0),     # 右
@@ -135,13 +135,26 @@ FTW_SEEDS = [
     (-1, 1)     # 左下
 ]
 
-def follow_the_wall(image, start_point):
+# 顺时针搜索，用于沿着右侧赛道内边界行走 (逻辑来自 FTW_right.py)
+FTW_SEEDS_RIGHT = [
+    (-1, 0),    # 左
+    (-1, -1),   # 左上
+    (0, -1),    # 上
+    (1, -1),    # 右上
+    (1, 0),     # 右
+    (1, 1),     # 右下
+    (0, 1),     # 下
+    (-1, 1)     # 左下
+]
+
+def follow_the_wall(image, start_point, seeds):
     """
     使用沿墙走(Follow The Wall)算法跟踪边界
     
     参数:
     image: 二值图像
     start_point: 起始点坐标 (x, y)
+    seeds: 八邻域搜索顺序
     
     返回:
     boundary_points: 边界点列表
@@ -155,11 +168,11 @@ def follow_the_wall(image, start_point):
         candidates = []
         
         for i in range(8):
-            dx_a, dy_a = FTW_SEEDS[i]
+            dx_a, dy_a = seeds[i]
             A_x = current_point[0] + dx_a
             A_y = current_point[1] + dy_a
             
-            dx_b, dy_b = FTW_SEEDS[(i + 1) % 8]
+            dx_b, dy_b = seeds[(i + 1) % 8]
             B_x = current_point[0] + dx_b
             B_y = current_point[1] + dy_b
             
@@ -272,6 +285,113 @@ class LineFollowerNode:
         
         rospy.loginfo("已创建图像订阅者和调试图像发布者，等待图像数据...")
         rospy.loginfo("当前状态: FOLLOW_LEFT")
+
+    def _process_image_for_centerline(self, binary_roi_frame, roi_display):
+        """
+        专门用于FOLLOW_TO_FINISH状态的双边线处理函数
+        
+        参数:
+        binary_roi_frame: 二值化ROI图像
+        roi_display: 用于绘制调试信息的彩色图像
+        
+        返回:
+        error: 计算出的误差
+        is_line_found: 是否找到线
+        roi_display: 更新后的调试图像
+        """
+        roi_h, roi_w = binary_roi_frame.shape[:2]
+        
+        # 寻找双起点 - 从下向上扫描，直到同时找到左右起点
+        left_start_point = None
+        right_start_point = None
+        current_scan_y = None
+        
+        for y in range(roi_h - 1, START_POINT_SEARCH_MIN_Y, -START_POINT_SCAN_STEP):
+            # 寻找左起点 (使用FTW_left.py现有逻辑)
+            start_search_x_left = (roi_w // 2) + HORIZONTAL_SEARCH_OFFSET
+            for x in range(start_search_x_left, 0, -1):
+                if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x - 1] == 255:
+                    left_start_point = (x - 1, y)
+                    break
+            
+            # 寻找右起点 (使用FTW_right.py的逻辑)
+            start_search_x_right = (roi_w // 2) - HORIZONTAL_SEARCH_OFFSET  # 相反偏移
+            for x in range(start_search_x_right, roi_w - 1):
+                if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x + 1] == 255:
+                    right_start_point = (x + 1, y)
+                    break
+            
+            # 只有同时找到左右起点才认为有效
+            if left_start_point is not None and right_start_point is not None:
+                current_scan_y = y
+                break
+            else:
+                # 重置，继续向上寻找
+                left_start_point = None
+                right_start_point = None
+        
+        # 如果没有找到双起点，返回无效结果
+        if left_start_point is None or right_start_point is None:
+            return 0.0, False, roi_display
+        
+        # 执行双边爬线
+        left_points = follow_the_wall(binary_roi_frame, left_start_point, FTW_SEEDS_LEFT)
+        right_points = follow_the_wall(binary_roi_frame, right_start_point, FTW_SEEDS_RIGHT)
+        
+        if not left_points or not right_points:
+            return 0.0, False, roi_display
+        
+        # 提取边线
+        left_border = extract_final_border(roi_h, left_points)
+        right_border = extract_final_border(roi_h, right_points)
+        
+        if left_border is None or right_border is None:
+            return 0.0, False, roi_display
+        
+        # 计算中线并复用胡萝卜点逻辑
+        base_y = left_start_point[1]  # 使用左起点的y坐标作为基准
+        anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
+        
+        center_points = []
+        for y in range(anchor_y, base_y + 1):
+            if left_border[y] != -1 and right_border[y] != -1:
+                center_x = (left_border[y] + right_border[y]) // 2
+                if 0 <= center_x < roi_w:
+                    center_points.append((center_x, y))
+                    # 绘制中线点（绿色）
+                    cv2.circle(roi_display, (center_x, y), 2, (0, 255, 0), -1)
+        
+        # 计算误差
+        error = 0.0
+        if center_points:
+            avg_x = sum(p[0] for p in center_points) / len(center_points)
+            error = avg_x - (roi_w // 2)
+        
+        # 绘制调试信息
+        # 绘制扫描线
+        if current_scan_y is not None:
+            cv2.line(roi_display, (0, current_scan_y), (roi_w, current_scan_y), (255, 0, 0), 1)
+        
+        # 绘制起点
+        cv2.circle(roi_display, left_start_point, 5, (0, 0, 255), -1)  # 红色
+        cv2.circle(roi_display, right_start_point, 5, (255, 0, 0), -1)  # 蓝色
+        
+        # 绘制左右边线
+        for point in left_points:
+            cv2.circle(roi_display, point, 1, (0, 255, 255), -1)  # 黄色
+        for point in right_points:
+            cv2.circle(roi_display, point, 1, (255, 255, 0), -1)  # 青色
+        
+        # 绘制胡萝卜点（如果中线在anchor_y有点的话）
+        if center_points:
+            # 找到anchor_y行的中心点
+            for center_x, y in center_points:
+                if y == anchor_y:
+                    cv2.drawMarker(roi_display, (center_x, anchor_y), 
+                                 (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
+                    break
+        
+        return error, True, roi_display
 
     def stop(self):
         """发布停止指令"""
@@ -475,72 +595,81 @@ class LineFollowerNode:
         roi_display = cv2.cvtColor(binary_roi_frame, cv2.COLOR_GRAY2BGR)
         roi_h, roi_w = binary_roi_frame.shape[:2]
 
-        # --- 2. 特征提取 (找线、计算误差) ---
-        start_search_x = (roi_w // 2) + HORIZONTAL_SEARCH_OFFSET
-        left_start_point = None
-        current_scan_y = None
+        # --- 2. 根据当前状态选择处理模式 ---
+        # 安全地读取当前状态
+        current_state_snapshot = self.current_state
         
-        # 从底部开始，每隔START_POINT_SCAN_STEP个像素向上扫描，寻找左边线起始点
-        # 限制最高搜索位置到START_POINT_SEARCH_MIN_Y
-        for y in range(roi_h - 1, START_POINT_SEARCH_MIN_Y, -START_POINT_SCAN_STEP):
-            # 从中心向左扫描寻找左边线的内侧起始点
-            for x in range(start_search_x, 0, -1):
-                if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x - 1] == 255:
-                    left_start_point = (x - 1, y)
-                    current_scan_y = y
-                    break
-            
-            if left_start_point is not None:
-                break
-
-        # --- 3. 计算误差和可视化 ---
         error = 0.0
         is_line_found = False
         line_y_position = 0
         
-        if left_start_point:
-            is_line_found = True
-            line_y_position = left_start_point[1]
+        if current_state_snapshot == FOLLOW_TO_FINISH:
+            # 使用双边线中线拟合逻辑
+            error, is_line_found, roi_display = self._process_image_for_centerline(binary_roi_frame, roi_display)
+            # 对于line_y_position，我们可以使用一个虚拟值，因为FOLLOW_TO_FINISH状态不需要它来判断状态转换
+            line_y_position = roi_h // 2  # 使用中间位置作为占位符
+        else:
+            # 使用原有的单边线逻辑
+            start_search_x = (roi_w // 2) + HORIZONTAL_SEARCH_OFFSET
+            left_start_point = None
+            current_scan_y = None
             
-            # 计算误差的逻辑
-            points = follow_the_wall(binary_roi_frame, left_start_point)
-            if points:
-                final_border = extract_final_border(roi_h, points)
-                if final_border is not None:
-                    base_y = left_start_point[1]
-                    anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
-                    roi_points = []
-                    for y_idx, x_val in enumerate(final_border):
-                        if anchor_y <= y_idx <= base_y and x_val != -1:
-                            center_x_path = x_val + CENTER_LINE_OFFSET
-                            if 0 <= center_x_path < roi_w:
-                                roi_points.append((center_x_path, y_idx))
-                                # 绘制区域内的中心线点（青色）
-                                cv2.circle(roi_display, (center_x_path, y_idx), 2, (255, 255, 0), -1)
-                    
-                    if roi_points:
-                        avg_x = sum(p[0] for p in roi_points) / len(roi_points)
-                        error = avg_x - (roi_w // 2)
-                    
-                    # 绘制左侧边线
-                    for point in points:
-                        cv2.circle(roi_display, point, 1, (0, 255, 255), -1)
-                    
-                    # 找到并绘制胡萝卜点
-                    if final_border[anchor_y] != -1:
-                        carrot_x = final_border[anchor_y] + CENTER_LINE_OFFSET
-                        if 0 <= carrot_x < roi_w:
-                            cv2.drawMarker(roi_display, (carrot_x, anchor_y), 
-                                         (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
-        
-        # 可视化：画出扫描线和找到的起始点
-        if current_scan_y is not None:
-            cv2.line(roi_display, (0, current_scan_y), (roi_w, current_scan_y), (255, 0, 0), 1)
-        
-        if is_line_found:
-            cv2.circle(roi_display, left_start_point, 5, (0, 0, 255), -1)
+            # 从底部开始，每隔START_POINT_SCAN_STEP个像素向上扫描，寻找左边线起始点
+            # 限制最高搜索位置到START_POINT_SEARCH_MIN_Y
+            for y in range(roi_h - 1, START_POINT_SEARCH_MIN_Y, -START_POINT_SCAN_STEP):
+                # 从中心向左扫描寻找左边线的内侧起始点
+                for x in range(start_search_x, 0, -1):
+                    if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x - 1] == 255:
+                        left_start_point = (x - 1, y)
+                        current_scan_y = y
+                        break
+                
+                if left_start_point is not None:
+                    break
 
-        # --- 停车区域检测 ---
+            if left_start_point:
+                is_line_found = True
+                line_y_position = left_start_point[1]
+                
+                # 计算误差的逻辑
+                points = follow_the_wall(binary_roi_frame, left_start_point, FTW_SEEDS_LEFT)
+                if points:
+                    final_border = extract_final_border(roi_h, points)
+                    if final_border is not None:
+                        base_y = left_start_point[1]
+                        anchor_y = max(0, base_y - LOOKAHEAD_DISTANCE)
+                        roi_points = []
+                        for y_idx, x_val in enumerate(final_border):
+                            if anchor_y <= y_idx <= base_y and x_val != -1:
+                                center_x_path = x_val + CENTER_LINE_OFFSET
+                                if 0 <= center_x_path < roi_w:
+                                    roi_points.append((center_x_path, y_idx))
+                                    # 绘制区域内的中心线点（青色）
+                                    cv2.circle(roi_display, (center_x_path, y_idx), 2, (255, 255, 0), -1)
+                        
+                        if roi_points:
+                            avg_x = sum(p[0] for p in roi_points) / len(roi_points)
+                            error = avg_x - (roi_w // 2)
+                        
+                        # 绘制左侧边线
+                        for point in points:
+                            cv2.circle(roi_display, point, 1, (0, 255, 255), -1)
+                        
+                        # 找到并绘制胡萝卜点
+                        if final_border[anchor_y] != -1:
+                            carrot_x = final_border[anchor_y] + CENTER_LINE_OFFSET
+                            if 0 <= carrot_x < roi_w:
+                                cv2.drawMarker(roi_display, (carrot_x, anchor_y), 
+                                             (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
+            
+            # 可视化：画出扫描线和找到的起始点（仅单边线模式）
+            if current_scan_y is not None:
+                cv2.line(roi_display, (0, current_scan_y), (roi_w, current_scan_y), (255, 0, 0), 1)
+            
+            if is_line_found:
+                cv2.circle(roi_display, left_start_point, 5, (0, 0, 255), -1)
+
+        # --- 3. 停车区域检测 ---
         # 计算检测窗口坐标（底部中心）
         stop_window_x_start = (roi_w // 2) - (STOP_ZONE_ROI_WIDTH_PX // 2)
         stop_window_x_end = stop_window_x_start + STOP_ZONE_ROI_WIDTH_PX
