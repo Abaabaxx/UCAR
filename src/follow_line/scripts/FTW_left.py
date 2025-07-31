@@ -30,6 +30,8 @@ STRAIGHT_TRANSITION = 1   # 状态二：直行过渡
 ROTATE_ALIGNMENT = 2      # 状态三：原地转向对准
 FOLLOW_LEFT_WITH_AVOIDANCE = 3 # 状态四：带避障巡线
 AVOIDANCE_MANEUVER = 4    # 状态五：执行避障机动
+FOLLOW_TO_FINISH = 5     # 状态六：最终冲刺巡线
+FINAL_STOP = 6           # 状态七：任务结束并停止
 
 # 状态名称映射（用于日志输出）
 STATE_NAMES = {
@@ -37,7 +39,9 @@ STATE_NAMES = {
     STRAIGHT_TRANSITION: "STRAIGHT_TRANSITION",
     ROTATE_ALIGNMENT: "ROTATE_ALIGNMENT",
     FOLLOW_LEFT_WITH_AVOIDANCE: "FOLLOW_LEFT_WITH_AVOIDANCE",
-    AVOIDANCE_MANEUVER: "AVOIDANCE_MANEUVER"
+    AVOIDANCE_MANEUVER: "AVOIDANCE_MANEUVER",
+    FOLLOW_TO_FINISH: "FOLLOW_TO_FINISH",
+    FINAL_STOP: "FINAL_STOP"
 }
 
 # ROS话题参数
@@ -75,16 +79,16 @@ ROTATE_ALIGNMENT_ERROR_THRESHOLD = 15 # 退出转向状态的像素误差阈值
 LINE_SEARCH_ROTATION_SPEED_DEG = 7.0 # 丢线后原地向左旋转搜索的速度 (度/秒)
 # 激光雷达板子垂直度检测参数 (用于ROTATE_ALIGNMENT状态)
 BOARD_DETECT_ANGLE_DEG = 45.0      # 扫描前方 +/- 这么多度
-BOARD_DETECT_MIN_DIST_M = 0.3      # 考虑的最小距离
+BOARD_DETECT_MIN_DIST_M = 0.26      # 考虑的最小距离
 BOARD_DETECT_MAX_DIST_M = 2.0      # 考虑的最大距离
 BOARD_DETECT_CLUSTER_TOL_M = 0.05  # 聚类时，点与点之间的最大距离
 BOARD_DETECT_MIN_CLUSTER_PTS = 5   # 一个有效聚类最少的点数
-BOARD_DETECT_MIN_LENGTH_M = 0.4    # 聚成的线段最小长度
-BOARD_DETECT_MAX_LENGTH_M = 0.7    # 聚成的线段最大长度
+BOARD_DETECT_MIN_LENGTH_M = 0.36    # 聚成的线段最小长度
+BOARD_DETECT_MAX_LENGTH_M = 0.66    # 聚成的线段最大长度
 BOARD_DETECT_ANGLE_TOL_DEG = 10.0  # 与水平线的最大角度容忍度(越小越垂直)
 # 激光雷达避障参数
 LIDAR_TOPIC = "/scan"                                  # 激光雷达话题名称
-AVOIDANCE_ANGLE_DEG = 20.0                             # 监控的前方角度范围（正负各20度）
+AVOIDANCE_ANGLE_DEG = 40.0                             # 监控的前方角度范围（正负各20度）
 AVOIDANCE_DISTANCE_M = 0.4                             # 触发避障的距离阈值（米）
 AVOIDANCE_POINT_THRESHOLD = 20                         # 触发避障的点数阈值
 # 避障机动参数
@@ -111,6 +115,12 @@ IPM_ROI_W = 640  # ROI宽度
 # 特殊区域检测参数
 NORMAL_AREA_HEIGHT_FROM_BOTTOM = 50  # 从ROI底部算起，被视为"常规"的区域高度（像素）
 CONSECUTIVE_FRAMES_FOR_DETECTION = 3  # 连续可疑帧数，达到此值则确认进入
+
+# 停车区域检测参数 (用于FOLLOW_TO_FINISH状态)
+STOP_ZONE_ROI_HEIGHT_PX = 3        # 从图像底部向上计算的窗口高度
+STOP_ZONE_ROI_WIDTH_PX = 30       # 窗口宽度
+STOP_ZONE_WHITE_PIXEL_THRESH = 0.60  # 窗口中白色像素的百分比阈值
+STOP_ZONE_CONSECUTIVE_FRAMES = 3     # 连续满足条件的帧数
 
 # 定义沿墙走的搜索模式（Follow The Wall）
 # 逆时针搜索，用于沿着左侧赛道内边界行走
@@ -222,6 +232,10 @@ class LineFollowerNode:
         
         # 初始化特殊区域检测相关的状态变量
         self.consecutive_special_frames = 0
+        
+        # 初始化停车区域检测相关的状态变量
+        self.is_stop_zone_detected = False   # 标记单帧是否检测到停车区
+        self.consecutive_stop_frames = 0     # 连续检测到停车区的帧数
         
         # 将最大角速度从度转换为弧度
         self.max_angular_speed_rad = np.deg2rad(MAX_ANGULAR_SPEED_DEG)
@@ -526,11 +540,40 @@ class LineFollowerNode:
         if is_line_found:
             cv2.circle(roi_display, left_start_point, 5, (0, 0, 255), -1)
 
+        # --- 停车区域检测 ---
+        # 计算检测窗口坐标（底部中心）
+        stop_window_x_start = (roi_w // 2) - (STOP_ZONE_ROI_WIDTH_PX // 2)
+        stop_window_x_end = stop_window_x_start + STOP_ZONE_ROI_WIDTH_PX
+        stop_window_y_start = roi_h - STOP_ZONE_ROI_HEIGHT_PX
+        stop_window_y_end = roi_h
+        
+        # 确保窗口坐标在图像边界内
+        stop_window_x_start = max(0, stop_window_x_start)
+        stop_window_x_end = min(roi_w, stop_window_x_end)
+        stop_window_y_start = max(0, stop_window_y_start)
+        
+        # 提取检测窗口
+        stop_detection_window = binary_roi_frame[stop_window_y_start:stop_window_y_end, 
+                                               stop_window_x_start:stop_window_x_end]
+        
+        # 计算白色像素数量和百分比
+        white_pixel_count = cv2.countNonZero(stop_detection_window)
+        total_pixels = stop_detection_window.shape[0] * stop_detection_window.shape[1]
+        white_pixel_ratio = white_pixel_count / total_pixels if total_pixels > 0 else 0.0
+        
+        # 判断是否满足停车条件
+        stop_zone_detected = white_pixel_ratio >= STOP_ZONE_WHITE_PIXEL_THRESH
+        
+        # 在调试图像上绘制检测窗口
+        cv2.rectangle(roi_display, (stop_window_x_start, stop_window_y_start), 
+                     (stop_window_x_end, stop_window_y_end), (0, 0, 255), 2)
+
         # --- 4. 将计算结果安全地存入实例变量 ---
         with self.data_lock:
             self.is_line_found = is_line_found
             self.line_y_position = line_y_position
             self.latest_vision_error = error
+            self.is_stop_zone_detected = stop_zone_detected
             self.latest_debug_image = roi_display.copy()
 
     def main_control_loop(self, timer_event):
@@ -600,8 +643,8 @@ class LineFollowerNode:
                 else:
                     self.stop()
                     rospy.loginfo("向右平移完成。避障机动结束。")
-                    # 机动完成，返回带避障的巡线状态
-                    self.current_state = FOLLOW_LEFT_WITH_AVOIDANCE
+                    # 机动完成，进入最终冲刺巡线状态
+                    self.current_state = FOLLOW_TO_FINISH
             
             self.cmd_vel_pub.publish(twist_msg)
             
@@ -661,9 +704,25 @@ class LineFollowerNode:
                     self.maneuver_step = 0
                     self.maneuver_initial_pose = None
                     return
+            
+            elif self.current_state == FOLLOW_TO_FINISH:
+                # 读取停车区检测结果
+                with self.data_lock:
+                    stop_zone_detected = self.is_stop_zone_detected
+                
+                if stop_zone_detected:
+                    self.consecutive_stop_frames += 1
+                else:
+                    self.consecutive_stop_frames = 0
+                
+                if self.consecutive_stop_frames >= STOP_ZONE_CONSECUTIVE_FRAMES:
+                    rospy.loginfo("状态转换: FOLLOW_TO_FINISH -> FINAL_STOP")
+                    self.stop()
+                    self.current_state = FINAL_STOP
+                    return
 
             # 状态执行逻辑 - 首先，根据当前状态确定默认的twist_msg (假设总能找到线)
-            if self.current_state == FOLLOW_LEFT or self.current_state == FOLLOW_LEFT_WITH_AVOIDANCE:
+            if self.current_state == FOLLOW_LEFT or self.current_state == FOLLOW_LEFT_WITH_AVOIDANCE or self.current_state == FOLLOW_TO_FINISH:
                 # PID巡线逻辑
                 if is_line_found:
                     self._execute_line_following_logic_in_main_loop(vision_error, twist_msg)
@@ -678,10 +737,14 @@ class LineFollowerNode:
                 twist_msg.linear.x = 0.0
                 twist_msg.angular.z = self.rotate_alignment_speed_rad
             
+            elif self.current_state == FINAL_STOP:
+                twist_msg.linear.x = 0.0
+                twist_msg.angular.z = 0.0
+            
             # 然后，作为最后一步，检查是否丢失了线，并覆盖上面的指令
             if not is_line_found:
                 # 只有在需要巡线的状态下才旋转搜索
-                if self.current_state in [FOLLOW_LEFT, FOLLOW_LEFT_WITH_AVOIDANCE, STRAIGHT_TRANSITION]:
+                if self.current_state in [FOLLOW_LEFT, FOLLOW_LEFT_WITH_AVOIDANCE, FOLLOW_TO_FINISH, STRAIGHT_TRANSITION]:
                     rospy.loginfo_throttle(1, "状态: %s | 丢线，开始原地旋转搜索...", STATE_NAMES[self.current_state])
                     twist_msg.linear.x = 0.0
                     twist_msg.angular.z = self.line_search_rotation_speed_rad
