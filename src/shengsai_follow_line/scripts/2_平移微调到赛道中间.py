@@ -26,16 +26,15 @@ rosservice call /follow_line/run "data: false"
 # --- 参数配置区 ---
 # 有限状态机（FSM）状态定义
 FOLLOW_RIGHT = 0          # 状态一：沿右墙巡线
-PARALLEL_OBSTACLE_BOARD = 1 # 状态二：平行障碍板
+ALIGN_WITH_ENTRANCE_BOARD = 1 # 状态二：旋转直到平行入口板
 ADJUST_LATERAL_POSITION = 2 # 状态三：横向调整位置
 
 # 状态名称映射（用于日志输出）
 STATE_NAMES = {
     FOLLOW_RIGHT: "FOLLOW_RIGHT",
-    PARALLEL_OBSTACLE_BOARD: "PARALLEL_OBSTACLE_BOARD",
+    ALIGN_WITH_ENTRANCE_BOARD: "ROTATE_TO_PARALLEL",
     ADJUST_LATERAL_POSITION: "ADJUST_LATERAL_POSITION"
 }
-
 # ROS话题参数
 IMAGE_TOPIC = "/usb_cam/image_raw"
 DEBUG_IMAGE_TOPIC = "/line_follower/debug_image"  # 新增：调试图像发布话题
@@ -86,19 +85,19 @@ NORMAL_AREA_HEIGHT_FROM_BOTTOM = 50  # 从ROI底部算起，被视为"常规"的
 CONSECUTIVE_FRAMES_FOR_DETECTION = 3  # 连续可疑帧数，达到此值则确认进入
 
 # ==============================================================================
-# 状态二: PARALLEL_OBSTACLE_BOARD (与右侧板平行)
+# 状态二: ALIGN_WITH_ENTRANCE_BOARD (与左侧入口板平行)
 # ==============================================================================
 # --- 行为参数 ---
 ALIGNMENT_ROTATION_SPEED_DEG = 7.0      # 旋转对齐时的角速度 (度/秒)
 BOARD_DETECT_ANGLE_TOL_DEG = 9.0        # 角度容忍度(越小要求越精确)
 
 # --- 检测参数 ---
-ALIGNMENT_TARGET_ANGLE_DEG = -90.0      # 扫描中心: 右侧 (-90度)
-ALIGNMENT_SCAN_RANGE_DEG = 180.0        # 扫描范围: 中心±90度
-ALIGNMENT_MIN_DIST_M = 0.25             # 最小检测距离
-ALIGNMENT_MAX_DIST_M = 1.5              # 最大检测距离
-ALIGNMENT_MIN_LENGTH_M = 0.45           # 板子最小长度
-ALIGNMENT_MAX_LENGTH_M = 0.62           # 板子最大长度
+ALIGN_TARGET_ANGLE_DEG = 90.0           # 扫描中心: 左侧 (90度)
+ALIGN_SCAN_RANGE_DEG = 80.0             # 扫描范围: 中心±40度
+ALIGN_MIN_DIST_M = 0.2                  # 最小检测距离
+ALIGN_MAX_DIST_M = 3.0                  # 最大检测距离
+ALIGN_MIN_LENGTH_M = 1.4                # 板子最小长度
+ALIGN_MAX_LENGTH_M = 1.6                # 板子最大长度
 
 # ==============================================================================
 # 状态三: ADJUST_LATERAL_POSITION (与左侧板保持距离)
@@ -115,6 +114,7 @@ ADJUST_MIN_DIST_M = 0.2                 # 最小检测距离
 ADJUST_MAX_DIST_M = 3.0                 # 最大检测距离
 ADJUST_MIN_LENGTH_M = 1.4               # 板子最小长度 (米)
 ADJUST_MAX_LENGTH_M = 1.6               # 板子最大长度 (米)
+ADJUST_BOARD_ANGLE_TOL_DEG = 9.0        # 角度容忍度
 
 # ==============================================================================
 # 全局激光雷达参数 (适用于所有状态)
@@ -369,7 +369,8 @@ class LineFollowerNode:
         return response
         
     def _find_board(self, scan_msg, target_angle_deg, scan_range_deg, alignment_mode, 
-                    min_dist_m, max_dist_m, min_length_m, max_length_m):
+                    min_dist_m=0.25, max_dist_m=1.5, min_length_m=0.45, max_length_m=0.62, 
+                    angle_tol_deg=9.0):
         """
         通用的板子检测函数，可以在任意方向寻找平行或垂直的板子
         
@@ -382,9 +383,10 @@ class LineFollowerNode:
         max_dist_m: 考虑的最大距离 (米)
         min_length_m: 聚类的最小长度 (米)
         max_length_m: 聚类的最大长度 (米)
+        angle_tol_deg: 角度容忍度
         
         返回:
-        tuple: (是否找到符合条件的板子, 横向距离, 角度)
+        tuple: (是否找到符合条件的板子, 中心点X坐标, 中心点Y坐标)
         """
         try:
             # 初始化调试MarkerArray
@@ -531,7 +533,7 @@ class LineFollowerNode:
                 # 根据对齐模式进行判断
                 if alignment_mode == 'PERPENDICULAR':
                     deviation = abs(angle_deg - 90)
-                    if deviation <= BOARD_DETECT_ANGLE_TOL_DEG:
+                    if deviation <= angle_tol_deg:
                         # 找到了一个垂直的板子
                         center_x_m = np.mean(cluster_array[:, 0])  # 前向距离（X轴）
                         lateral_error_m = np.mean(cluster_array[:, 1])  # 横向偏差（Y轴）
@@ -543,11 +545,11 @@ class LineFollowerNode:
                         
                         rospy.loginfo_throttle(2, "检测到垂直板子: 中心点(x=%.2f, y=%.2f)m, 长度=%.2fm, 角度偏差=%.1f度", 
                                              center_x_m, lateral_error_m, length, deviation)
-                        return (True, lateral_error_m, angle_deg)
+                        return (True, center_x_m, lateral_error_m)
                         
                 elif alignment_mode == 'PARALLEL':
                     deviation = angle_deg  # 平行时，角度应接近0度
-                    if deviation <= BOARD_DETECT_ANGLE_TOL_DEG:
+                    if deviation <= angle_tol_deg:
                         # 找到了一个平行的板子
                         center_x_m = np.mean(cluster_array[:, 0])  # 前向距离（X轴）
                         lateral_error_m = np.mean(cluster_array[:, 1])  # 横向偏差（Y轴）
@@ -559,7 +561,7 @@ class LineFollowerNode:
                         
                         rospy.loginfo_throttle(2, "检测到平行板子: 中心点(x=%.2f, y=%.2f)m, 长度=%.2fm, 角度=%.1f度", 
                                              center_x_m, lateral_error_m, length, angle_deg)
-                        return (True, lateral_error_m, angle_deg)
+                        return (True, center_x_m, lateral_error_m)
             
             return (False, 0.0, 0.0)
             
@@ -575,17 +577,18 @@ class LineFollowerNode:
         with self.data_lock:
             current_state = self.current_state
         
-        if current_state == PARALLEL_OBSTACLE_BOARD:
-            # 右侧平行板检测（状态二）
-            board_found, lateral_error, angle = self._find_board(
+        if current_state == ALIGN_WITH_ENTRANCE_BOARD:
+            # 左侧入口板检测（状态二）
+            board_found, board_center_x, board_center_y = self._find_board(
                 msg, 
-                ALIGNMENT_TARGET_ANGLE_DEG,
-                ALIGNMENT_SCAN_RANGE_DEG,
+                ALIGN_TARGET_ANGLE_DEG,
+                ALIGN_SCAN_RANGE_DEG,
                 'PARALLEL',
-                ALIGNMENT_MIN_DIST_M,
-                ALIGNMENT_MAX_DIST_M,
-                ALIGNMENT_MIN_LENGTH_M,
-                ALIGNMENT_MAX_LENGTH_M
+                ALIGN_MIN_DIST_M,
+                ALIGN_MAX_DIST_M,
+                ALIGN_MIN_LENGTH_M,
+                ALIGN_MAX_LENGTH_M,
+                BOARD_DETECT_ANGLE_TOL_DEG
             )
             
             # 更新共享状态
@@ -594,7 +597,7 @@ class LineFollowerNode:
                 
         elif current_state == ADJUST_LATERAL_POSITION:
             # 左侧板检测（状态三）
-            board_found, lateral_error, angle = self._find_board(
+            board_found, board_center_x, board_center_y = self._find_board(
                 msg,
                 ADJUST_TARGET_ANGLE_DEG,
                 ADJUST_SCAN_RANGE_DEG,
@@ -602,13 +605,14 @@ class LineFollowerNode:
                 ADJUST_MIN_DIST_M,
                 ADJUST_MAX_DIST_M,
                 ADJUST_MIN_LENGTH_M,
-                ADJUST_MAX_LENGTH_M
+                ADJUST_MAX_LENGTH_M,
+                ADJUST_BOARD_ANGLE_TOL_DEG
             )
             
             # 更新共享状态
             with self.data_lock:
                 self.is_left_board_found = board_found
-                self.latest_lateral_error_m = lateral_error
+                self.latest_lateral_error_m = board_center_y
 
     def image_callback(self, data):
         """
@@ -738,9 +742,9 @@ class LineFollowerNode:
             
             # 如果连续N帧都满足条件，则执行状态转换
             if self.consecutive_special_frames >= CONSECUTIVE_FRAMES_FOR_DETECTION:
-                rospy.loginfo("状态转换: FOLLOW_RIGHT -> PARALLEL_OBSTACLE_BOARD")
+                rospy.loginfo("状态转换: FOLLOW_RIGHT -> ALIGN_WITH_ENTRANCE_BOARD")
                 self.stop() # 立即停车
-                self.current_state = PARALLEL_OBSTACLE_BOARD
+                self.current_state = ALIGN_WITH_ENTRANCE_BOARD
                 # 关键：立即发布停车指令并结束本次循环，避免执行旧状态的逻辑
                 self.cmd_vel_pub.publish(twist_msg)
                 return
@@ -754,10 +758,10 @@ class LineFollowerNode:
                 # 丢线则停止
                 self.stop()
         
-        elif self.current_state == PARALLEL_OBSTACLE_BOARD:
+        elif self.current_state == ALIGN_WITH_ENTRANCE_BOARD:
             if is_board_aligned:
                 # 如果已对齐，则停止并转换到下一个状态
-                rospy.loginfo("状态转换: PARALLEL_OBSTACLE_BOARD -> ADJUST_LATERAL_POSITION")
+                rospy.loginfo("状态转换: ALIGN_WITH_ENTRANCE_BOARD -> ADJUST_LATERAL_POSITION")
                 twist_msg.linear.x = 0.0
                 twist_msg.angular.z = 0.0
                 self.current_state = ADJUST_LATERAL_POSITION
@@ -766,7 +770,7 @@ class LineFollowerNode:
                 return
             else:
                 # 如果未对齐，则向左旋转
-                rospy.loginfo_throttle(1, "状态: %s | 未检测到平行板，向左旋转...", STATE_NAMES[self.current_state])
+                rospy.loginfo_throttle(1, "状态: %s | 未检测到平行入口板，向左旋转...", STATE_NAMES[self.current_state])
                 twist_msg.linear.x = 0.0
                 twist_msg.angular.z = self.alignment_rotation_speed_rad
         
