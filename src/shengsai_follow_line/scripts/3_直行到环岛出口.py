@@ -423,7 +423,7 @@ class LineFollowerNode:
         angle_tol_deg: 角度容忍度
         
         返回:
-        tuple: (是否找到符合条件的板子, 中心点X坐标, 中心点Y坐标)
+        tuple: (是否找到符合条件的板子, 中心点X坐标, 中心点Y坐标, 角度偏差)
         """
         try:
             # 初始化调试MarkerArray
@@ -456,7 +456,7 @@ class LineFollowerNode:
                     points.append((x, y))
             
             if len(points) < BOARD_DETECT_MIN_CLUSTER_PTS:
-                return (False, 0.0, 0.0)
+                return (False, 0.0, 0.0, 999.0)
             
             # 2. 简单距离聚类
             clusters = []
@@ -582,7 +582,7 @@ class LineFollowerNode:
                         
                         rospy.loginfo_throttle(2, "检测到垂直板子: 中心点(x=%.2f, y=%.2f)m, 长度=%.2fm, 角度偏差=%.1f度", 
                                              center_x_m, lateral_error_m, length, deviation)
-                        return (True, center_x_m, lateral_error_m)
+                        return (True, center_x_m, lateral_error_m, deviation)
                         
                 elif alignment_mode == 'PARALLEL':
                     deviation = angle_deg  # 平行时，角度应接近0度
@@ -598,13 +598,13 @@ class LineFollowerNode:
                         
                         rospy.loginfo_throttle(2, "检测到平行板子: 中心点(x=%.2f, y=%.2f)m, 长度=%.2fm, 角度=%.1f度", 
                                              center_x_m, lateral_error_m, length, angle_deg)
-                        return (True, center_x_m, lateral_error_m)
+                        return (True, center_x_m, lateral_error_m, deviation)
             
-            return (False, 0.0, 0.0)
+            return (False, 0.0, 0.0, 999.0)
             
         except Exception as e:
             rospy.logwarn_throttle(5, "板子检测出错: %s", str(e))
-            return (False, 0.0, 0.0)
+            return (False, 0.0, 0.0, 999.0)
     
     def scan_callback(self, msg):
         """
@@ -618,7 +618,7 @@ class LineFollowerNode:
         
         if current_state == ALIGN_WITH_ENTRANCE_BOARD:
             # 左侧入口板检测（状态二）
-            board_found, board_center_x, board_center_y = self._find_board(
+            board_found, board_center_x, board_center_y, _ = self._find_board(
                 msg, 
                 ALIGN_TARGET_ANGLE_DEG,
                 ALIGN_SCAN_RANGE_DEG,
@@ -635,11 +635,8 @@ class LineFollowerNode:
                 self.is_board_aligned = board_found
                 
         elif current_state == ADJUST_LATERAL_POSITION:
-            # 根据当前阶段选择不同的角度容忍度
-            angle_tol = CORRECTION_ANGLE_TOL_DEG if s3_dist_achieved else OBSERVATION_ANGLE_TOL_DEG
-            
-            # 左侧板检测（状态三）
-            board_found, board_center_x, board_center_y = self._find_board(
+            # 始终使用宽容的"观察阈值"来寻找和跟踪板子
+            board_found, board_center_x, board_center_y, board_angle_dev = self._find_board(
                 msg,
                 ADJUST_TARGET_ANGLE_DEG,
                 ADJUST_SCAN_RANGE_DEG,
@@ -648,7 +645,7 @@ class LineFollowerNode:
                 ADJUST_MAX_DIST_M,
                 ADJUST_MIN_LENGTH_M,
                 ADJUST_MAX_LENGTH_M,
-                angle_tol  # 动态选择角度容忍度
+                OBSERVATION_ANGLE_TOL_DEG  # 使用宽容阈值(20°)进行目标跟踪
             )
             
             # 更新共享状态
@@ -656,19 +653,18 @@ class LineFollowerNode:
                 self.is_left_board_found = board_found
                 self.latest_lateral_error_m = board_center_y
                 
-                # 如果在修正阶段且检测到板子，则更新姿态修正状态
-                if s3_dist_achieved and board_found:
-                    self.is_angle_correction_ok = True
-                elif s3_dist_achieved:
-                    # 如果在修正阶段但未检测到板子，则姿态未修正
-                    self.is_angle_correction_ok = False
+                # 如果在姿态修正阶段 (阶段B)，则需要检查角度是否已达到严格目标
+                if s3_dist_achieved:
+                    if board_found and board_angle_dev <= CORRECTION_ANGLE_TOL_DEG:
+                        # 找到了板子，并且其角度在严格阈值(9°)内
+                        self.is_angle_correction_ok = True
+                    else:
+                        # 没找到板子，或找到了但角度未达标
+                        self.is_angle_correction_ok = False
                 
         elif current_state == DRIVE_TO_CENTER:
-            # 根据当前阶段选择不同的角度容忍度
-            angle_tol = CORRECTION_ANGLE_TOL_DEG if s4_pos_achieved else OBSERVATION_ANGLE_TOL_DEG
-            
-            # 左侧板检测（状态四）
-            board_found, board_center_x, board_center_y = self._find_board(
+            # 同样，始终使用宽容的"观察阈值"来寻找和跟踪板子
+            board_found, board_center_x, board_center_y, board_angle_dev = self._find_board(
                 msg,
                 DRIVE_TO_CENTER_TARGET_ANGLE_DEG,
                 DRIVE_TO_CENTER_SCAN_RANGE_DEG,
@@ -677,7 +673,7 @@ class LineFollowerNode:
                 DRIVE_TO_CENTER_MAX_DIST_M,
                 DRIVE_TO_CENTER_MIN_LENGTH_M,
                 DRIVE_TO_CENTER_MAX_LENGTH_M,
-                angle_tol  # 动态选择角度容忍度
+                OBSERVATION_ANGLE_TOL_DEG  # 使用宽容阈值(20°)进行目标跟踪
             )
             
             # 更新共享状态
@@ -685,12 +681,14 @@ class LineFollowerNode:
                 self.is_left_board_found = board_found # 复用找到板子的标志
                 self.latest_board_center_x_m = board_center_x
                 
-                # 如果在修正阶段且检测到板子，则更新姿态修正状态
-                if s4_pos_achieved and board_found:
-                    self.is_angle_correction_ok = True
-                elif s4_pos_achieved:
-                    # 如果在修正阶段但未检测到板子，则姿态未修正
-                    self.is_angle_correction_ok = False
+                # 如果在最终姿态锁定阶段 (阶段B)，则需要检查角度是否已达到严格目标
+                if s4_pos_achieved:
+                    if board_found and board_angle_dev <= CORRECTION_ANGLE_TOL_DEG:
+                        # 找到了板子，并且其角度在严格阈值(9°)内
+                        self.is_angle_correction_ok = True
+                    else:
+                        # 没找到板子，或找到了但角度未达标
+                        self.is_angle_correction_ok = False
 
     def image_callback(self, data):
         """
