@@ -89,12 +89,6 @@ NORMAL_AREA_HEIGHT_FROM_BOTTOM = 50  # 从ROI底部算起，被视为"常规"的
 CONSECUTIVE_FRAMES_FOR_DETECTION = 3  # 连续可疑帧数，达到此值则确认进入
 
 # ==============================================================================
-# 行为容错参数 (适用于状态三和状态四)
-# ==============================================================================
-OBSERVATION_ANGLE_TOL_DEG = 20.0  # 移动跟踪时宽容的角度阈值 (度)
-CORRECTION_ANGLE_TOL_DEG = 9.0   # 姿态修正时严格的角度阈值 (度)
-
-# ==============================================================================
 # 状态二: ALIGN_WITH_ENTRANCE_BOARD (与左侧入口板平行)
 # ==============================================================================
 # --- 行为参数 ---
@@ -107,12 +101,14 @@ ALIGN_MIN_DIST_M = 0.2                  # 最小检测距离
 ALIGN_MAX_DIST_M = 3.0                  # 最大检测距离
 ALIGN_MIN_LENGTH_M = 1.4                # 板子最小长度
 ALIGN_MAX_LENGTH_M = 1.6                # 板子最大长度
+ALIGN_ANGLE_TOL_DEG = 9.0              # 与入口板平行时的角度容忍度 (度)
+ALIGN_OBSERVATION_ANGLE_TOL_DEG = 20.0  # 与入口板平行时的观察角度容忍度 (度)
 
 # ==============================================================================
 # 状态三: ADJUST_LATERAL_POSITION (与左侧板保持距离)
 # ==============================================================================
 # --- 行为参数 ---
-ADJUST_TARGET_LATERAL_DIST_M = 1.94      # 与左侧板的目标横向距离 (米)
+ADJUST_TARGET_LATERAL_DIST_M = 1.98      # 与左侧板的目标横向距离 (米)
 ADJUST_LATERAL_SPEED_M_S = 0.1          # 横向平移速度 (米/秒)
 ADJUST_LATERAL_POS_TOL_M = 0.03         # 横向位置容差 (米)
 
@@ -123,7 +119,8 @@ ADJUST_MIN_DIST_M = 0.2                 # 最小检测距离
 ADJUST_MAX_DIST_M = 3.0                 # 最大检测距离
 ADJUST_MIN_LENGTH_M = 1.4               # 板子最小长度 (米)
 ADJUST_MAX_LENGTH_M = 1.6               # 板子最大长度 (米)
-# 角度容忍度现在由全局参数OBSERVATION_ANGLE_TOL_DEG和CORRECTION_ANGLE_TOL_DEG控制
+ADJUST_CORRECTION_ANGLE_TOL_DEG = 9.0   # 横向位置调整时的姿态修正角度容忍度 (度)
+ADJUST_OBSERVATION_ANGLE_TOL_DEG = 20.0  # 横向位置调整时的观察角度容忍度 (度)
 
 # ==============================================================================
 # 状态四: DRIVE_TO_CENTER (直行到入口板中心)
@@ -140,7 +137,8 @@ DRIVE_TO_CENTER_MIN_DIST_M = 0.2          # 最小检测距离
 DRIVE_TO_CENTER_MAX_DIST_M = 1.5          # 最大检测距离
 DRIVE_TO_CENTER_MIN_LENGTH_M = 0.4        # 短板最小长度 (米)
 DRIVE_TO_CENTER_MAX_LENGTH_M = 0.6        # 短板最大长度 (米)
-# 角度容忍度现在由全局参数OBSERVATION_ANGLE_TOL_DEG和CORRECTION_ANGLE_TOL_DEG控制
+DRIVE_TO_CENTER_CORRECTION_ANGLE_TOL_DEG = 9.0  # 直行到中心时的姿态修正角度容忍度 (度)
+DRIVE_TO_CENTER_OBSERVATION_ANGLE_TOL_DEG = 20.0  # 直行到中心时的观察角度容忍度 (度)
 
 # ==============================================================================
 # 状态五: ROTATE_TO_FACE_EXIT_BOARD (旋转正对出口板)
@@ -152,6 +150,7 @@ EXIT_MIN_DIST_M = 0.2                 # 最小检测距离
 EXIT_MAX_DIST_M = 1.5                 # 最大检测距离
 EXIT_MIN_LENGTH_M = 0.4               # 板子最小长度 (米)
 EXIT_MAX_LENGTH_M = 0.6               # 板子最大长度 (米)
+EXIT_ANGLE_TOL_DEG = 2.0              # 正对出口板时的角度容忍度 (度)
 
 # ==============================================================================
 # 全局激光雷达参数 (适用于所有状态)
@@ -645,7 +644,7 @@ class LineFollowerNode:
                 ALIGN_MAX_DIST_M,
                 ALIGN_MIN_LENGTH_M,
                 ALIGN_MAX_LENGTH_M,
-                CORRECTION_ANGLE_TOL_DEG  # 使用严格阈值进行对齐
+                ALIGN_ANGLE_TOL_DEG  # 使用状态二的专属角度阈值
             )
             
             # 更新共享状态
@@ -663,7 +662,7 @@ class LineFollowerNode:
                 ADJUST_MAX_DIST_M,
                 ADJUST_MIN_LENGTH_M,
                 ADJUST_MAX_LENGTH_M,
-                OBSERVATION_ANGLE_TOL_DEG  # 使用宽容阈值(20°)进行目标跟踪
+                ADJUST_OBSERVATION_ANGLE_TOL_DEG  # 使用状态三的观察角度阈值
             )
             
             # 更新共享状态
@@ -673,7 +672,7 @@ class LineFollowerNode:
                 
                 # 如果在姿态修正阶段 (阶段B)，则需要检查角度是否已达到严格目标
                 if s3_dist_achieved:
-                    if board_found and board_angle_dev <= CORRECTION_ANGLE_TOL_DEG:
+                    if board_found and board_angle_dev <= ADJUST_CORRECTION_ANGLE_TOL_DEG:
                         # 找到了板子，并且其角度在严格阈值(9°)内
                         self.is_angle_correction_ok = True
                     else:
@@ -691,7 +690,7 @@ class LineFollowerNode:
                 DRIVE_TO_CENTER_MAX_DIST_M,
                 DRIVE_TO_CENTER_MIN_LENGTH_M,
                 DRIVE_TO_CENTER_MAX_LENGTH_M,
-                OBSERVATION_ANGLE_TOL_DEG  # 使用宽容阈值(20°)进行目标跟踪
+                DRIVE_TO_CENTER_OBSERVATION_ANGLE_TOL_DEG  # 使用状态四的观察角度阈值
             )
             
             # 更新共享状态
@@ -701,7 +700,7 @@ class LineFollowerNode:
                 
                 # 如果在最终姿态锁定阶段 (阶段B)，则需要检查角度是否已达到严格目标
                 if s4_pos_achieved:
-                    if board_found and board_angle_dev <= CORRECTION_ANGLE_TOL_DEG:
+                    if board_found and board_angle_dev <= DRIVE_TO_CENTER_CORRECTION_ANGLE_TOL_DEG:
                         # 找到了板子，并且其角度在严格阈值(9°)内
                         self.is_angle_correction_ok = True
                     else:
@@ -719,7 +718,7 @@ class LineFollowerNode:
                 EXIT_MAX_DIST_M,
                 EXIT_MIN_LENGTH_M,
                 EXIT_MAX_LENGTH_M,
-                CORRECTION_ANGLE_TOL_DEG  # 使用严格阈值(9°)进行垂直检测
+                EXIT_ANGLE_TOL_DEG  # 使用状态五的专属角度阈值
             )
             
             # 更新共享状态
@@ -955,7 +954,7 @@ class LineFollowerNode:
                         # 姿态修正中，使用固定的旋转速度
                         twist_msg.angular.z = self.alignment_rotation_speed_rad
                         rospy.loginfo_throttle(1, "状态: %s | 阶段B-姿态修正中 (使用严格角度阈值 ±%.1f°)", 
-                                             STATE_NAMES[self.current_state], CORRECTION_ANGLE_TOL_DEG)
+                                             STATE_NAMES[self.current_state], ADJUST_CORRECTION_ANGLE_TOL_DEG)
         
         elif self.current_state == DRIVE_TO_CENTER:
             # 从实例变量中安全地读取左侧板子的检测结果和内部状态标志
@@ -1023,7 +1022,7 @@ class LineFollowerNode:
                         # 姿态修正中，使用固定的旋转速度
                         twist_msg.angular.z = self.alignment_rotation_speed_rad
                         rospy.loginfo_throttle(1, "状态: %s | 阶段B-最终姿态锁定中 (使用严格角度阈值 ±%.1f°)", 
-                                             STATE_NAMES[self.current_state], CORRECTION_ANGLE_TOL_DEG)
+                                             STATE_NAMES[self.current_state], DRIVE_TO_CENTER_CORRECTION_ANGLE_TOL_DEG)
         
         elif self.current_state == ROTATE_TO_FACE_EXIT_BOARD:
             # 从实例变量中安全地读取出口板子的检测结果
