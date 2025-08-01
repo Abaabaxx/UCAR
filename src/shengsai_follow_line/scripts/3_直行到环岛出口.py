@@ -130,14 +130,14 @@ ADJUST_MAX_LENGTH_M = 1.6               # 板子最大长度 (米)
 DRIVE_TO_CENTER_SPEED_M_S = 0.1       # 直行速度 (米/秒)
 DRIVE_TO_CENTER_POS_TOL_M = 0.05      # 中心位置容差 (米)
 
-# --- 检测参数 (与状态三共享相同的目标板) ---
-# 此处参数为了代码清晰而重定义，但数值与状态三一致
-DRIVE_TO_CENTER_TARGET_ANGLE_DEG = 90.0
-DRIVE_TO_CENTER_SCAN_RANGE_DEG = 80.0
-DRIVE_TO_CENTER_MIN_DIST_M = 0.2
-DRIVE_TO_CENTER_MAX_DIST_M = 3.0
-DRIVE_TO_CENTER_MIN_LENGTH_M = 1.4
-DRIVE_TO_CENTER_MAX_LENGTH_M = 1.6
+# --- 检测参数 (右侧短板) ---
+# 注意：这里的参数与状态三不同，因为我们现在检测的是右侧的短板
+DRIVE_TO_CENTER_TARGET_ANGLE_DEG = -90.0  # 扫描中心: 右侧 (-90度)
+DRIVE_TO_CENTER_SCAN_RANGE_DEG = 90.0     # 扫描范围: 中心±45度
+DRIVE_TO_CENTER_MIN_DIST_M = 0.2          # 最小检测距离
+DRIVE_TO_CENTER_MAX_DIST_M = 1.5          # 最大检测距离
+DRIVE_TO_CENTER_MIN_LENGTH_M = 0.4        # 短板最小长度 (米)
+DRIVE_TO_CENTER_MAX_LENGTH_M = 0.6        # 短板最大长度 (米)
 # 角度容忍度现在由全局参数OBSERVATION_ANGLE_TOL_DEG和CORRECTION_ANGLE_TOL_DEG控制
 
 # ==============================================================================
@@ -932,15 +932,16 @@ class LineFollowerNode:
             twist_msg.linear.y = 0.0
 
             if not is_left_board_found:
-                # 如果没有找到左侧板子，则停止所有移动并等待
-                rospy.loginfo_throttle(1, "状态: %s | 未检测到左侧板子，停止移动并等待...", STATE_NAMES[self.current_state])
+                # 如果没有找到右侧短板，则停止所有移动并等待
+                rospy.loginfo_throttle(1, "状态: %s | 未检测到右侧短板，停止移动并等待...", STATE_NAMES[self.current_state])
                 twist_msg.linear.x = 0.0
                 twist_msg.angular.z = 0.0
             else:
                 # 计算位置误差, 补偿雷达的物理安装偏移。
-                # 我们的目标是让机器人中心(base_link)对准板子中心。
+                # 我们的目标是让机器人中心(base_link)对准右侧短板的中心。
                 # 这意味着当激光雷达(laser_frame)观测到的板子中心x坐标
                 # 等于雷达自身的x偏移量时，任务就完成了。
+                rospy.loginfo_throttle(1, "状态: %s | 基于右侧短板进行修正", STATE_NAMES[self.current_state])
                 # 因此，误差 = 当前观测值 - 目标观测值
                 pos_error = latest_board_center_x_m - LIDAR_X_OFFSET_M
                 
@@ -957,10 +958,10 @@ class LineFollowerNode:
                         twist_msg.linear.x = 0.0
                         twist_msg.angular.z = 0.0
                     else:
-                        # 未达到中心位置，向前直行
-                        twist_msg.linear.x = DRIVE_TO_CENTER_SPEED_M_S
+                        # 根据误差符号决定前进或后退，但速度恒定
+                        twist_msg.linear.x = np.sign(pos_error) * DRIVE_TO_CENTER_SPEED_M_S
                         twist_msg.angular.z = 0.0  # 确保不旋转
-                        rospy.loginfo_throttle(1, "状态: %s | 阶段A-前进中 (位置误差: %.2fm)", 
+                        rospy.loginfo_throttle(1, "状态: %s | 阶段A-移动中 (位置误差: %.2fm)", 
                                              STATE_NAMES[self.current_state], pos_error)
                 
                 # --- 阶段B: 最终姿态锁定阶段 ---
@@ -977,6 +978,7 @@ class LineFollowerNode:
                         with self.data_lock:
                             self.s4_pos_achieved = False
                             self.is_angle_correction_ok = False
+                            self.is_running = False # 任务完成，彻底停止主循环
                             
                         # 立即发布停止指令并结束本次循环
                         self.cmd_vel_pub.publish(Twist())
