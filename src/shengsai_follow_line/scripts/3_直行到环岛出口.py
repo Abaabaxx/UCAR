@@ -580,8 +580,10 @@ class LineFollowerNode:
                                                     coeffs if 'coeffs' in locals() else None, 
                                                     x_std, y_std, debug_marker_array)
                         
-                        rospy.loginfo_throttle(2, "检测到垂直板子: 中心点(x=%.2f, y=%.2f)m, 长度=%.2fm, 角度偏差=%.1f度", 
-                                             center_x_m, lateral_error_m, length, deviation)
+                        # 为日志记录计算base_link坐标
+                        center_x_base_link = center_x_m + LIDAR_X_OFFSET_M
+                        rospy.loginfo_throttle(2, "检测到垂直板子: 中心点(机器人坐标系 x=%.2f, y=%.2f)m, 长度=%.2fm, 角度偏差=%.1f度", 
+                                             center_x_base_link, lateral_error_m, length, deviation)
                         return (True, center_x_m, lateral_error_m, deviation)
                         
                 elif alignment_mode == 'PARALLEL':
@@ -596,8 +598,10 @@ class LineFollowerNode:
                                                     coeffs if 'coeffs' in locals() else None, 
                                                     x_std, y_std, debug_marker_array)
                         
-                        rospy.loginfo_throttle(2, "检测到平行板子: 中心点(x=%.2f, y=%.2f)m, 长度=%.2fm, 角度=%.1f度", 
-                                             center_x_m, lateral_error_m, length, angle_deg)
+                        # 为日志记录计算base_link坐标
+                        center_x_base_link = center_x_m + LIDAR_X_OFFSET_M
+                        rospy.loginfo_throttle(2, "检测到平行板子: 中心点(机器人坐标系 x=%.2f, y=%.2f)m, 长度=%.2fm, 角度=%.1f度", 
+                                             center_x_base_link, lateral_error_m, length, angle_deg)
                         return (True, center_x_m, lateral_error_m, deviation)
             
             return (False, 0.0, 0.0, 999.0)
