@@ -939,11 +939,10 @@ class LineFollowerNode:
             else:
                 # 计算位置误差, 补偿雷达的物理安装偏移。
                 # 我们的目标是让机器人中心(base_link)对准右侧短板的中心。
-                # 这意味着当激光雷达(laser_frame)观测到的板子中心x坐标
-                # 等于雷达自身的x偏移量时，任务就完成了。
+                # 正确的计算: (激光雷达的读数) + (激光雷达的位置) = 板子相对于机器人中心的位置
+                # 误差 = 板子相对于机器人中心的位置 - 目标位置(0)
                 rospy.loginfo_throttle(1, "状态: %s | 基于右侧短板进行修正", STATE_NAMES[self.current_state])
-                # 因此，误差 = 当前观测值 - 目标观测值
-                pos_error = latest_board_center_x_m - LIDAR_X_OFFSET_M
+                pos_error = latest_board_center_x_m + LIDAR_X_OFFSET_M  # 加上偏移量（因为LIDAR_X_OFFSET_M已经是负值）
                 
                 # --- 阶段A: 移动阶段 ---
                 if not s4_pos_achieved:
