@@ -103,9 +103,9 @@ ALIGN_MAX_LENGTH_M = 1.6                # 板子最大长度
 # 状态三: ADJUST_LATERAL_POSITION (与左侧板保持距离)
 # ==============================================================================
 # --- 行为参数 ---
-ADJUST_TARGET_LATERAL_DIST_M = 2.0      # 与左侧板的目标横向距离 (米)
+ADJUST_TARGET_LATERAL_DIST_M = 1.94      # 与左侧板的目标横向距离 (米)
 ADJUST_LATERAL_SPEED_M_S = 0.1          # 横向平移速度 (米/秒)
-ADJUST_LATERAL_POS_TOL_M = 0.05         # 横向位置容差 (米)
+ADJUST_LATERAL_POS_TOL_M = 0.03         # 横向位置容差 (米)
 
 # --- 检测参数 ---
 ADJUST_TARGET_ANGLE_DEG = 90.0          # 扫描中心: 左侧 (90度)
@@ -301,7 +301,7 @@ class LineFollowerNode:
         self.is_board_aligned = False  # 用于标记是否已与板子平行
         self.is_left_board_found = False  # 用于标记是否找到左侧板子
         self.latest_lateral_error_m = 0.0  # 与左侧板子的当前距离
-        self.last_valid_lateral_twist_y = 0.0  # 上一次有效的横向速度指令
+
         
         # 初始化特殊区域检测相关的状态变量
         self.consecutive_special_frames = 0
@@ -785,9 +785,9 @@ class LineFollowerNode:
             twist_msg.angular.z = 0.0
             
             if not is_left_board_found:
-                # 如果没有找到左侧板子，则继续使用上一次的有效横向速度指令
-                rospy.loginfo_throttle(1, "状态: %s | 未检测到左侧板子，继续上一次的横向移动...", STATE_NAMES[self.current_state])
-                twist_msg.linear.y = self.last_valid_lateral_twist_y
+                # 如果没有找到左侧板子，则停止横向移动并等待
+                rospy.loginfo_throttle(1, "状态: %s | 未检测到左侧板子，停止横向移动并等待...", STATE_NAMES[self.current_state])
+                twist_msg.linear.y = 0.0
             else:
                 # 如果找到了左侧板子，则计算距离误差并控制横向速度
                 dist_error = latest_lateral_error_m - ADJUST_TARGET_LATERAL_DIST_M
@@ -806,8 +806,7 @@ class LineFollowerNode:
                     rospy.loginfo_throttle(1, "状态: %s | 调整位置中 (当前距离: %.2fm, 目标距离: %.2fm, 误差: %.2fm)", 
                                          STATE_NAMES[self.current_state], latest_lateral_error_m, ADJUST_TARGET_LATERAL_DIST_M, dist_error)
                 
-                # 保存当前的横向速度指令，供目标丢失时使用
-                self.last_valid_lateral_twist_y = twist_msg.linear.y
+
         
         # 发布最终确定的指令
         self.cmd_vel_pub.publish(twist_msg)
