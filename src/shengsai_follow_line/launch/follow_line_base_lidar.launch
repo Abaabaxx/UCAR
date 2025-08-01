@@ -2,6 +2,9 @@
     <!-- 底盘驱动 -->
     <include file="$(find ucar_controller)/launch/base_driver_ekf.launch" />
 
+    <!-- 激光雷达驱动 -->
+    <include file="$(find ydlidar)/launch/ydlidar.launch" />
+
     <!-- 加载机器人URDF模型描述 -->
     <param name="robot_description" textfile="$(find ucar_nav)/urdf/xfcar.urdf" />
     
@@ -10,8 +13,5 @@
     <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" />
     
     <!-- USB摄像头模块 -->
-    <include file="$(find lby_usb_cam)/launch/usb_cam_noimg.launch" />  
-
-    <!-- 巡线节点 -->
-    <node pkg="follow_line" type="follow_line_show.py" name="line_follower_node" output="screen" /> 
+    <include file="$(find lby_usb_cam)/launch/usb_cam_noimg.launch" />   
 </launch>

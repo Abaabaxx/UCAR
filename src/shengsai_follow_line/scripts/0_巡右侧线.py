@@ -4,15 +4,13 @@
 import cv2
 import numpy as np
 import rospy
-from sensor_msgs.msg import Image, LaserScan
+from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from std_srvs.srv import SetBool, SetBoolResponse
-from geometry_msgs.msg import Twist, Point
-from visualization_msgs.msg import Marker, MarkerArray
+from geometry_msgs.msg import Twist
 
 from threading import Lock
 import time
-import math
 '''
 可视化
 rqt_image_view /line_follower/debug_image
@@ -83,23 +81,6 @@ IPM_ROI_W = 640  # ROI宽度
 NORMAL_AREA_HEIGHT_FROM_BOTTOM = 50  # 从ROI底部算起，被视为"常规"的区域高度（像素）
 CONSECUTIVE_FRAMES_FOR_DETECTION = 3  # 连续可疑帧数，达到此值则确认进入
 
-# --- 激光雷达板子检测参数 ---
-LIDAR_TOPIC = "/scan"                   # 激光雷达话题名称
-ALIGNMENT_ROTATION_SPEED_DEG = 7.0      # 对齐时的旋转速度 (度/秒, 正为左转)
-
-# 对齐时的扫描参数
-ALIGNMENT_TARGET_ANGLE_DEG = -90.0      # 对齐扫描的目标中心角度 (度), -90为右侧
-ALIGNMENT_SCAN_RANGE_DEG = 180.0         # 对齐扫描的角度范围 (度), 180即中心±90度
-
-# 板子物理属性与聚类参数
-BOARD_DETECT_MIN_DIST_M = 0.25       # 考虑的最小距离
-BOARD_DETECT_MAX_DIST_M = 1.5       # 考虑的最大距离
-BOARD_DETECT_CLUSTER_TOL_M = 0.05   # 聚类时，点与点之间的最大距离
-BOARD_DETECT_MIN_CLUSTER_PTS = 5    # 一个有效聚类最少的点数
-BOARD_DETECT_MIN_LENGTH_M = 0.45    # 聚成的线段最小长度
-BOARD_DETECT_MAX_LENGTH_M = 0.62    # 聚成的线段最大长度
-BOARD_DETECT_ANGLE_TOL_DEG = 9.0    # 角度容忍度(越小要求越精确)
-
 # 定义沿墙走的搜索模式（Follow The Wall）
 # 顺时针搜索，用于沿着右侧赛道内边界行走
 FTW_SEEDS_RIGHT = [
@@ -169,95 +150,7 @@ def extract_final_border(image_height, raw_points):
     
     return final_border
 
-
-
 class LineFollowerNode:
-    def _visualize_board_markers(self, scan_msg, cluster_array, center_x_m, lateral_error_m, coeffs, x_std, y_std, debug_marker_array):
-        """
-        可视化板子的中心点和法向量
-        """
-        # 1. 可视化中心点 (一个黄色的球体)
-        center_marker = Marker()
-        center_marker.header.frame_id = scan_msg.header.frame_id
-        center_marker.header.stamp = rospy.Time.now()
-        center_marker.ns = "debug_info_ns"
-        center_marker.id = 100 # 使用一个较大的ID，避免与聚类点冲突
-        center_marker.type = Marker.SPHERE
-        center_marker.action = Marker.ADD
-        
-        center_marker.pose.position.x = center_x_m
-        center_marker.pose.position.y = lateral_error_m
-        center_marker.pose.position.z = 0
-        center_marker.pose.orientation.w = 1.0
-        
-        center_marker.scale.x = 0.1
-        center_marker.scale.y = 0.1
-        center_marker.scale.z = 0.1
-        
-        center_marker.color.a = 1.0
-        center_marker.color.r = 1.0
-        center_marker.color.g = 1.0
-        center_marker.color.b = 0.0 # 黄色
-        
-        center_marker.lifetime = rospy.Duration(0.5)
-        debug_marker_array.markers.append(center_marker)
-
-        # 2. 可视化法向量 (一个从中心点出发的紫色箭头)
-        normal_marker = Marker()
-        normal_marker.header.frame_id = scan_msg.header.frame_id
-        normal_marker.header.stamp = rospy.Time.now()
-        normal_marker.ns = "debug_info_ns"
-        normal_marker.id = 101
-        normal_marker.type = Marker.ARROW
-        normal_marker.action = Marker.ADD
-
-        # 箭头的起点是聚类的中心
-        start_p = Point(x=center_x_m, y=lateral_error_m, z=0)
-
-        # 箭头的终点代表法向量方向
-        end_p = Point()
-        
-        # 根据拟合方向计算基础法向量
-        if coeffs is not None:
-            if x_std > y_std: # 拟合 y = mx + c
-                slope = coeffs[0]
-                # 法向量方向 (-slope, 1)
-                normal_vector = np.array([-slope, 1.0])
-            else: # 拟合 x = my + c
-                slope = coeffs[0]
-                # 法向量方向 (1, -slope)
-                normal_vector = np.array([1.0, -slope])
-
-            # 检查并确保法线指向外侧 (远离雷达原点)
-            lidar_to_center = np.array([center_x_m, lateral_error_m])
-            if np.dot(normal_vector, lidar_to_center) < 0:
-                normal_vector = -normal_vector # 翻转法线
-
-            # 归一化并设置箭头终点
-            norm = np.linalg.norm(normal_vector)
-            if norm > 1e-6:
-                unit_normal = normal_vector / norm
-                end_p.x = center_x_m + unit_normal[0] * 0.5 # 箭头长度0.5米
-                end_p.y = lateral_error_m + unit_normal[1] * 0.5
-                end_p.z = 0
-                
-                normal_marker.points.append(start_p)
-                normal_marker.points.append(end_p)
-        
-        normal_marker.scale.x = 0.02 # 箭杆直径
-        normal_marker.scale.y = 0.04 # 箭头宽度
-        
-        normal_marker.color.a = 1.0
-        normal_marker.color.r = 1.0
-        normal_marker.color.g = 0.0
-        normal_marker.color.b = 1.0 # 紫色
-
-        normal_marker.lifetime = rospy.Duration(0.5)
-        debug_marker_array.markers.append(normal_marker)
-        
-        # 发布调试标记
-        self.debug_markers_pub.publish(debug_marker_array)
-    
     def __init__(self):
         # 初始化运行状态
         self.is_running = False
@@ -274,7 +167,6 @@ class LineFollowerNode:
         self.is_line_found = False
         self.line_y_position = 0  # 用于状态转换判断
         self.latest_debug_image = np.zeros((IPM_ROI_H, IPM_ROI_W, 3), dtype=np.uint8)
-        self.is_board_aligned = False  # 用于标记是否已与板子平行
         
         # 初始化特殊区域检测相关的状态变量
         self.consecutive_special_frames = 0
@@ -290,9 +182,6 @@ class LineFollowerNode:
         # 将最大角速度从度转换为弧度
         self.max_angular_speed_rad = np.deg2rad(MAX_ANGULAR_SPEED_DEG)
         
-        # 将对齐旋转速度从度转换为弧度
-        self.alignment_rotation_speed_rad = np.deg2rad(ALIGNMENT_ROTATION_SPEED_DEG)
-        
         # 计算正向透视变换矩阵
         try:
             self.forward_perspective_matrix = np.linalg.inv(INVERSE_PERSPECTIVE_MATRIX)
@@ -302,17 +191,10 @@ class LineFollowerNode:
         
         # 创建图像订阅者
         self.image_sub = rospy.Subscriber(IMAGE_TOPIC, Image, self.image_callback)
-        # 创建激光雷达订阅者
-        self.scan_sub = rospy.Subscriber(LIDAR_TOPIC, LaserScan, self.scan_callback)
         # 创建调试图像发布者
         self.debug_image_pub = rospy.Publisher(DEBUG_IMAGE_TOPIC, Image, queue_size=1)
         # 创建速度指令发布者
         self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
-        
-        # 创建一个用于在RViz中可视化雷达聚类的发布者
-        self.clusters_pub = rospy.Publisher('/line_follower/lidar_clusters', MarkerArray, queue_size=10)
-        # 创建一个用于在RViz中可视化调试信息的发布者
-        self.debug_markers_pub = rospy.Publisher('/line_follower/debug_markers', MarkerArray, queue_size=10)
         
         # 创建运行状态控制服务
         self.run_service = rospy.Service('/follow_line/run', SetBool, self.handle_set_running)
@@ -340,216 +222,6 @@ class LineFollowerNode:
         response.success = True
         response.message = "Running state set to: {}".format(self.is_running)
         return response
-        
-    def _find_board(self, scan_msg, target_angle_deg, scan_range_deg, alignment_mode):
-        """
-        通用的板子检测函数，可以在任意方向寻找平行或垂直的板子
-        
-        参数:
-        scan_msg: 激光雷达数据
-        target_angle_deg: 目标扫描的中心角度（度）。0表示正前方，-90表示正右方，90表示正左方
-        scan_range_deg: 扫描的角度范围（度）。例如60表示在中心角度的±30度范围内扫描
-        alignment_mode: 对齐模式，可以是'PERPENDICULAR'（垂直）或'PARALLEL'（平行）
-        
-        返回:
-        bool: 是否找到符合条件的板子
-        """
-        try:
-            # 初始化调试MarkerArray
-            debug_marker_array = MarkerArray()
-            # 添加一个DELETEALL标记，以清除上一帧的调试标记
-            clear_marker = Marker()
-            clear_marker.id = 0
-            clear_marker.ns = "debug_info_ns"
-            clear_marker.action = Marker.DELETEALL
-            debug_marker_array.markers.append(clear_marker)
-            
-            # 1. 数据筛选：只考虑指定角度和距离范围内的点
-            center_angle_rad = np.deg2rad(target_angle_deg)
-            scan_half_range_rad = np.deg2rad(scan_range_deg / 2.0)
-            
-            # 计算角度索引范围
-            center_index = int((center_angle_rad - scan_msg.angle_min) / scan_msg.angle_increment)
-            angle_index_range = int(scan_half_range_rad / scan_msg.angle_increment)
-            start_index = max(0, center_index - angle_index_range)
-            end_index = min(len(scan_msg.ranges), center_index + angle_index_range)
-            
-            # 提取有效点的坐标
-            points = []
-            for i in range(start_index, end_index):
-                distance = scan_msg.ranges[i]
-                if BOARD_DETECT_MIN_DIST_M <= distance <= BOARD_DETECT_MAX_DIST_M:
-                    angle = scan_msg.angle_min + i * scan_msg.angle_increment
-                    x = distance * np.cos(angle)
-                    y = distance * np.sin(angle)
-                    points.append((x, y))
-            
-            if len(points) < BOARD_DETECT_MIN_CLUSTER_PTS:
-                return False
-            
-            # 2. 简单距离聚类
-            clusters = []
-            current_cluster = []
-            
-            for i, point in enumerate(points):
-                if len(current_cluster) == 0:
-                    current_cluster.append(point)
-                else:
-                    # 计算与前一个点的距离
-                    prev_point = current_cluster[-1]
-                    distance = np.sqrt((point[0] - prev_point[0])**2 + (point[1] - prev_point[1])**2)
-                    
-                    if distance <= BOARD_DETECT_CLUSTER_TOL_M:
-                        current_cluster.append(point)
-                    else:
-                        # 距离太远，开始新聚类
-                        if len(current_cluster) >= BOARD_DETECT_MIN_CLUSTER_PTS:
-                            clusters.append(current_cluster)
-                        current_cluster = [point]
-            
-            # 不要忘记最后一个聚类
-            if len(current_cluster) >= BOARD_DETECT_MIN_CLUSTER_PTS:
-                clusters.append(current_cluster)
-            
-            # --- [开始] 可视化所有找到的聚类 ---
-            marker_array = MarkerArray()
-
-            # 1. 创建一个特殊的Marker用于清除上一帧的所有标记
-            clear_marker = Marker()
-            clear_marker.id = 0
-            clear_marker.ns = "lidar_clusters_ns" # 使用一个命名空间
-            clear_marker.action = Marker.DELETEALL
-            marker_array.markers.append(clear_marker)
-
-            # 2. 遍历所有找到的聚类，并为每一个都创建一个可视化标记
-            for i, cluster in enumerate(clusters):
-                marker = Marker()
-                marker.header.frame_id = scan_msg.header.frame_id
-                marker.header.stamp = rospy.Time.now()
-                marker.ns = "lidar_clusters_ns"
-                marker.id = i + 1 # ID 0 已被DELETEALL使用
-                marker.type = Marker.POINTS  # 将每个聚类显示为一组点
-                marker.action = Marker.ADD
-
-                marker.pose.orientation.w = 1.0
-                
-                # 设置点的大小
-                marker.scale.x = 0.03
-                marker.scale.y = 0.03
-
-                # 根据聚类的索引号赋予不同颜色（红/绿交替）
-                marker.color.a = 1.0  # 不透明
-                marker.color.r = float(i % 2 == 0)
-                marker.color.g = float(i % 2 != 0)
-                marker.color.b = 0.0
-
-                marker.lifetime = rospy.Duration(0.5)
-
-                # 将聚类中的所有点添加到marker消息中
-                for x, y in cluster:
-                    p = Point(x=x, y=y, z=0)
-                    marker.points.append(p)
-                
-                marker_array.markers.append(marker)
-            
-            # 3. 在所有marker都准备好后，只发布一次MarkerArray
-            self.clusters_pub.publish(marker_array)
-            # --- [结束] 可视化代码 ---
-            
-            # 3. 聚类验证和角度检测
-            for cluster in clusters:
-                if len(cluster) < BOARD_DETECT_MIN_CLUSTER_PTS:
-                    continue
-                
-                # 计算聚类长度
-                start_point = np.array(cluster[0])
-                end_point = np.array(cluster[-1])
-                length = np.linalg.norm(end_point - start_point)
-                
-                if not (BOARD_DETECT_MIN_LENGTH_M <= length <= BOARD_DETECT_MAX_LENGTH_M):
-                    continue
-                
-                # 线性拟合并计算角度
-                cluster_array = np.array(cluster)
-                x_coords = cluster_array[:, 0]
-                y_coords = cluster_array[:, 1]
-                
-                # 判断拟合方向
-                x_std = np.std(x_coords)
-                y_std = np.std(y_coords)
-                
-                if x_std < 1e-6:  # 垂直线
-                    angle_deg = 90.0
-                elif y_std < 1e-6:  # 水平线
-                    angle_deg = 0.0
-                else:
-                    if x_std > y_std:
-                        # 拟合 y = mx + c
-                        coeffs = np.polyfit(x_coords, y_coords, 1)
-                        slope = coeffs[0]
-                        angle_rad = np.arctan(slope)
-                    else:
-                        # 拟合 x = my + c
-                        coeffs = np.polyfit(y_coords, x_coords, 1)
-                        slope = coeffs[0]
-                        angle_rad = np.arctan(1.0 / slope) if slope != 0 else np.pi/2
-                    
-                    angle_deg = abs(np.rad2deg(angle_rad))
-                
-                # 根据对齐模式进行判断
-                if alignment_mode == 'PERPENDICULAR':
-                    deviation = abs(angle_deg - 90)
-                    if deviation <= BOARD_DETECT_ANGLE_TOL_DEG:
-                        # 找到了一个垂直的板子
-                        center_x_m = np.mean(cluster_array[:, 0])  # 前向距离（X轴）
-                        lateral_error_m = np.mean(cluster_array[:, 1])  # 横向偏差（Y轴）
-                        
-                        # 可视化中心点和法向量
-                        self._visualize_board_markers(scan_msg, cluster_array, center_x_m, lateral_error_m, 
-                                                    coeffs if 'coeffs' in locals() else None, 
-                                                    x_std, y_std, debug_marker_array)
-                        
-                        rospy.loginfo_throttle(2, "检测到垂直板子: 中心点(x=%.2f, y=%.2f)m, 长度=%.2fm, 角度偏差=%.1f度", 
-                                             center_x_m, lateral_error_m, length, deviation)
-                        return True
-                        
-                elif alignment_mode == 'PARALLEL':
-                    deviation = angle_deg  # 平行时，角度应接近0度
-                    if deviation <= BOARD_DETECT_ANGLE_TOL_DEG:
-                        # 找到了一个平行的板子
-                        center_x_m = np.mean(cluster_array[:, 0])  # 前向距离（X轴）
-                        lateral_error_m = np.mean(cluster_array[:, 1])  # 横向偏差（Y轴）
-                        
-                        # 可视化中心点和法向量
-                        self._visualize_board_markers(scan_msg, cluster_array, center_x_m, lateral_error_m, 
-                                                    coeffs if 'coeffs' in locals() else None, 
-                                                    x_std, y_std, debug_marker_array)
-                        
-                        rospy.loginfo_throttle(2, "检测到平行板子: 中心点(x=%.2f, y=%.2f)m, 长度=%.2fm, 角度=%.1f度", 
-                                             center_x_m, lateral_error_m, length, angle_deg)
-                        return True
-            
-            return False
-            
-        except Exception as e:
-            rospy.logwarn_throttle(5, "板子检测出错: %s", str(e))
-            return False
-    
-    def scan_callback(self, msg):
-        """
-        处理激光雷达数据，检测右侧是否存在平行的板子
-        """
-        # 调用通用函数，使用配置区的参数
-        board_found = self._find_board(
-            msg, 
-            ALIGNMENT_TARGET_ANGLE_DEG,
-            ALIGNMENT_SCAN_RANGE_DEG,
-            'PARALLEL'
-        )
-
-        # 更新共享状态
-        with self.data_lock:
-            self.is_board_aligned = board_found
 
     def image_callback(self, data):
         """
@@ -663,7 +335,6 @@ class LineFollowerNode:
             vision_error = self.latest_vision_error
             line_y = self.line_y_position
             debug_image = self.latest_debug_image.copy()
-            is_board_aligned = self.is_board_aligned
 
         # --- 2. 状态机决策与执行 ---
         twist_msg = Twist()
@@ -696,16 +367,9 @@ class LineFollowerNode:
                 self.stop()
         
         elif self.current_state == PARALLEL_OBSTACLE_BOARD:
-            if is_board_aligned:
-                # 如果已对齐，则停止
-                rospy.loginfo_throttle(1, "状态: %s | 已与右侧板子平行，停止", STATE_NAMES[self.current_state])
-                twist_msg.linear.x = 0.0
-                twist_msg.angular.z = 0.0
-            else:
-                # 如果未对齐，则向左旋转
-                rospy.loginfo_throttle(1, "状态: %s | 未检测到平行板，向左旋转...", STATE_NAMES[self.current_state])
-                twist_msg.linear.x = 0.0
-                twist_msg.angular.z = self.alignment_rotation_speed_rad
+            # 停止状态：什么都不做，保持静止
+            twist_msg.linear.x = 0.0
+            twist_msg.angular.z = 0.0
         
         # 发布最终确定的指令
         self.cmd_vel_pub.publish(twist_msg)
