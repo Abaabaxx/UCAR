@@ -87,15 +87,20 @@ NORMAL_AREA_HEIGHT_FROM_BOTTOM = 50  # 从ROI底部算起，被视为"常规"的
 CONSECUTIVE_FRAMES_FOR_DETECTION = 3  # 连续可疑帧数，达到此值则确认进入
 
 # ==============================================================================
+# 行为容错参数 (适用于状态三和状态四)
+# ==============================================================================
+OBSERVATION_ANGLE_TOL_DEG = 20.0  # 移动跟踪时宽容的角度阈值 (度)
+CORRECTION_ANGLE_TOL_DEG = 9.0   # 姿态修正时严格的角度阈值 (度)
+
+# ==============================================================================
 # 状态二: ALIGN_WITH_ENTRANCE_BOARD (与左侧入口板平行)
 # ==============================================================================
 # --- 行为参数 ---
 ALIGNMENT_ROTATION_SPEED_DEG = 7.0      # 旋转对齐时的角速度 (度/秒)
-BOARD_DETECT_ANGLE_TOL_DEG = 9.0        # 角度容忍度(越小要求越精确)
 
 # --- 检测参数 ---
 ALIGN_TARGET_ANGLE_DEG = 90.0           # 扫描中心: 左侧 (90度)
-ALIGN_SCAN_RANGE_DEG = 160.0             # 扫描范围: 中心±40度
+ALIGN_SCAN_RANGE_DEG = 80.0             # 扫描范围: 中心±40度
 ALIGN_MIN_DIST_M = 0.2                  # 最小检测距离
 ALIGN_MAX_DIST_M = 3.0                  # 最大检测距离
 ALIGN_MIN_LENGTH_M = 1.4                # 板子最小长度
@@ -111,12 +116,12 @@ ADJUST_LATERAL_POS_TOL_M = 0.03         # 横向位置容差 (米)
 
 # --- 检测参数 ---
 ADJUST_TARGET_ANGLE_DEG = 90.0          # 扫描中心: 左侧 (90度)
-ADJUST_SCAN_RANGE_DEG = 160.0            # 扫描范围: 中心±40度
+ADJUST_SCAN_RANGE_DEG = 80.0            # 扫描范围: 中心±40度
 ADJUST_MIN_DIST_M = 0.2                 # 最小检测距离
 ADJUST_MAX_DIST_M = 3.0                 # 最大检测距离
 ADJUST_MIN_LENGTH_M = 1.4               # 板子最小长度 (米)
 ADJUST_MAX_LENGTH_M = 1.6               # 板子最大长度 (米)
-ADJUST_BOARD_ANGLE_TOL_DEG = 9.0        # 角度容忍度
+# 角度容忍度现在由全局参数OBSERVATION_ANGLE_TOL_DEG和CORRECTION_ANGLE_TOL_DEG控制
 
 # ==============================================================================
 # 状态四: DRIVE_TO_CENTER (直行到入口板中心)
@@ -128,12 +133,12 @@ DRIVE_TO_CENTER_POS_TOL_M = 0.05      # 中心位置容差 (米)
 # --- 检测参数 (与状态三共享相同的目标板) ---
 # 此处参数为了代码清晰而重定义，但数值与状态三一致
 DRIVE_TO_CENTER_TARGET_ANGLE_DEG = 90.0
-DRIVE_TO_CENTER_SCAN_RANGE_DEG = 160.0
+DRIVE_TO_CENTER_SCAN_RANGE_DEG = 80.0
 DRIVE_TO_CENTER_MIN_DIST_M = 0.2
 DRIVE_TO_CENTER_MAX_DIST_M = 3.0
 DRIVE_TO_CENTER_MIN_LENGTH_M = 1.4
 DRIVE_TO_CENTER_MAX_LENGTH_M = 1.6
-DRIVE_TO_CENTER_ANGLE_TOL_DEG = 9.0
+# 角度容忍度现在由全局参数OBSERVATION_ANGLE_TOL_DEG和CORRECTION_ANGLE_TOL_DEG控制
 
 # ==============================================================================
 # 全局激光雷达参数 (适用于所有状态)
@@ -141,6 +146,13 @@ DRIVE_TO_CENTER_ANGLE_TOL_DEG = 9.0
 LIDAR_TOPIC = "/scan"                   # 激光雷达话题名称
 BOARD_DETECT_CLUSTER_TOL_M = 0.05       # 聚类时，点与点之间的最大距离
 BOARD_DETECT_MIN_CLUSTER_PTS = 5        # 一个有效聚类最少的点数
+
+# ==============================================================================
+# 机器人物理参数
+# ==============================================================================
+# 根据 `rosrun tf tf_echo base_link laser_frame` 的输出,
+# 激光雷达安装在机器人旋转中心(base_link)后方0.1米处。
+LIDAR_X_OFFSET_M = -0.1
 
 
 # 定义沿墙走的搜索模式（Follow The Wall）
@@ -321,6 +333,11 @@ class LineFollowerNode:
         self.is_left_board_found = False  # 用于标记是否找到左侧板子
         self.latest_lateral_error_m = 0.0  # 与左侧板子的当前距离
         self.latest_board_center_x_m = 0.0 # 板子中心点的前后位置
+        
+        # 初始化新的内部阶段标志
+        self.s3_dist_achieved = False      # 状态三：横向距离是否已达到
+        self.s4_pos_achieved = False       # 状态四：前进中心位置是否已达到
+        self.is_angle_correction_ok = False # 通用的姿态修正成功标志
 
         
         # 初始化特殊区域检测相关的状态变量
@@ -596,6 +613,8 @@ class LineFollowerNode:
         # 安全地读取当前状态
         with self.data_lock:
             current_state = self.current_state
+            s3_dist_achieved = self.s3_dist_achieved
+            s4_pos_achieved = self.s4_pos_achieved
         
         if current_state == ALIGN_WITH_ENTRANCE_BOARD:
             # 左侧入口板检测（状态二）
@@ -608,7 +627,7 @@ class LineFollowerNode:
                 ALIGN_MAX_DIST_M,
                 ALIGN_MIN_LENGTH_M,
                 ALIGN_MAX_LENGTH_M,
-                BOARD_DETECT_ANGLE_TOL_DEG
+                CORRECTION_ANGLE_TOL_DEG  # 使用严格阈值进行对齐
             )
             
             # 更新共享状态
@@ -616,6 +635,9 @@ class LineFollowerNode:
                 self.is_board_aligned = board_found
                 
         elif current_state == ADJUST_LATERAL_POSITION:
+            # 根据当前阶段选择不同的角度容忍度
+            angle_tol = CORRECTION_ANGLE_TOL_DEG if s3_dist_achieved else OBSERVATION_ANGLE_TOL_DEG
+            
             # 左侧板检测（状态三）
             board_found, board_center_x, board_center_y = self._find_board(
                 msg,
@@ -626,7 +648,7 @@ class LineFollowerNode:
                 ADJUST_MAX_DIST_M,
                 ADJUST_MIN_LENGTH_M,
                 ADJUST_MAX_LENGTH_M,
-                ADJUST_BOARD_ANGLE_TOL_DEG
+                angle_tol  # 动态选择角度容忍度
             )
             
             # 更新共享状态
@@ -634,7 +656,17 @@ class LineFollowerNode:
                 self.is_left_board_found = board_found
                 self.latest_lateral_error_m = board_center_y
                 
+                # 如果在修正阶段且检测到板子，则更新姿态修正状态
+                if s3_dist_achieved and board_found:
+                    self.is_angle_correction_ok = True
+                elif s3_dist_achieved:
+                    # 如果在修正阶段但未检测到板子，则姿态未修正
+                    self.is_angle_correction_ok = False
+                
         elif current_state == DRIVE_TO_CENTER:
+            # 根据当前阶段选择不同的角度容忍度
+            angle_tol = CORRECTION_ANGLE_TOL_DEG if s4_pos_achieved else OBSERVATION_ANGLE_TOL_DEG
+            
             # 左侧板检测（状态四）
             board_found, board_center_x, board_center_y = self._find_board(
                 msg,
@@ -645,13 +677,20 @@ class LineFollowerNode:
                 DRIVE_TO_CENTER_MAX_DIST_M,
                 DRIVE_TO_CENTER_MIN_LENGTH_M,
                 DRIVE_TO_CENTER_MAX_LENGTH_M,
-                DRIVE_TO_CENTER_ANGLE_TOL_DEG
+                angle_tol  # 动态选择角度容忍度
             )
             
             # 更新共享状态
             with self.data_lock:
                 self.is_left_board_found = board_found # 复用找到板子的标志
                 self.latest_board_center_x_m = board_center_x
+                
+                # 如果在修正阶段且检测到板子，则更新姿态修正状态
+                if s4_pos_achieved and board_found:
+                    self.is_angle_correction_ok = True
+                elif s4_pos_achieved:
+                    # 如果在修正阶段但未检测到板子，则姿态未修正
+                    self.is_angle_correction_ok = False
 
     def image_callback(self, data):
         """
@@ -784,6 +823,10 @@ class LineFollowerNode:
                 rospy.loginfo("状态转换: FOLLOW_RIGHT -> ALIGN_WITH_ENTRANCE_BOARD")
                 self.stop() # 立即停车
                 self.current_state = ALIGN_WITH_ENTRANCE_BOARD
+                # 重置所有内部阶段标志
+                self.s3_dist_achieved = False
+                self.s4_pos_achieved = False
+                self.is_angle_correction_ok = False
                 # 关键：立即发布停车指令并结束本次循环，避免执行旧状态的逻辑
                 self.cmd_vel_pub.publish(twist_msg)
                 return
@@ -814,68 +857,137 @@ class LineFollowerNode:
                 twist_msg.angular.z = self.alignment_rotation_speed_rad
         
         elif self.current_state == ADJUST_LATERAL_POSITION:
-            # 从实例变量中安全地读取左侧板子的检测结果
+            # 从实例变量中安全地读取左侧板子的检测结果和内部状态标志
             with self.data_lock:
                 is_left_board_found = self.is_left_board_found
                 latest_lateral_error_m = self.latest_lateral_error_m
+                s3_dist_achieved = self.s3_dist_achieved
+                is_angle_correction_ok = self.is_angle_correction_ok
             
-            # 确保twist_msg的前进和旋转速度为零
+            # 确保twist_msg的前进速度为零
             twist_msg.linear.x = 0.0
-            twist_msg.angular.z = 0.0
             
             if not is_left_board_found:
-                # 如果没有找到左侧板子，则停止横向移动并等待
-                rospy.loginfo_throttle(1, "状态: %s | 未检测到左侧板子，停止横向移动并等待...", STATE_NAMES[self.current_state])
+                # 如果没有找到左侧板子，则停止所有移动并等待
+                rospy.loginfo_throttle(1, "状态: %s | 未检测到左侧板子，停止移动并等待...", STATE_NAMES[self.current_state])
                 twist_msg.linear.y = 0.0
+                twist_msg.angular.z = 0.0
             else:
-                # 如果找到了左侧板子，则计算距离误差并控制横向速度
+                # 计算距离误差
                 dist_error = latest_lateral_error_m - ADJUST_TARGET_LATERAL_DIST_M
                 
-                # 判断是否在容差范围内
-                if abs(dist_error) <= ADJUST_LATERAL_POS_TOL_M:
-                    # 已达到目标位置，转换到下一个状态
-                    rospy.loginfo("状态转换: ADJUST_LATERAL_POSITION -> DRIVE_TO_CENTER")
-                    self.stop() # 立即停车确保平稳过渡
-                    self.current_state = DRIVE_TO_CENTER
-                    # 立即发布停止指令并结束本次循环
-                    self.cmd_vel_pub.publish(Twist())
-                    return
+                # --- 阶段A: 移动阶段 ---
+                if not s3_dist_achieved:
+                    # 判断是否在容差范围内
+                    if abs(dist_error) <= ADJUST_LATERAL_POS_TOL_M:
+                        # 横向距离已达到目标，标记阶段A完成，进入阶段B
+                        rospy.loginfo("横向距离已达到目标 (%.2fm)，进入姿态修正阶段", latest_lateral_error_m)
+                        with self.data_lock:
+                            self.s3_dist_achieved = True
+                            self.is_angle_correction_ok = False  # 重置姿态修正标志
+                        # 立即停止移动
+                        twist_msg.linear.y = 0.0
+                        twist_msg.angular.z = 0.0
+                    else:
+                        # 未达到目标位置，计算横向速度
+                        twist_msg.linear.y = np.sign(dist_error) * ADJUST_LATERAL_SPEED_M_S
+                        twist_msg.angular.z = 0.0  # 确保不旋转
+                        rospy.loginfo_throttle(1, "状态: %s | 阶段A-移动中 (当前距离: %.2fm, 目标距离: %.2fm, 误差: %.2fm)", 
+                                             STATE_NAMES[self.current_state], latest_lateral_error_m, 
+                                             ADJUST_TARGET_LATERAL_DIST_M, dist_error)
+                
+                # --- 阶段B: 姿态修正阶段 ---
                 else:
-                    # 未达到目标位置，计算横向速度
-                    # 如果dist_error为正，说明当前距离大于目标距离，需要向左移动（正方向）
-                    # 如果dist_error为负，说明当前距离小于目标距离，需要向右移动（负方向）
-                    twist_msg.linear.y = np.sign(dist_error) * ADJUST_LATERAL_SPEED_M_S
-                    rospy.loginfo_throttle(1, "状态: %s | 调整位置中 (当前距离: %.2fm, 目标距离: %.2fm, 误差: %.2fm)", 
-                                         STATE_NAMES[self.current_state], latest_lateral_error_m, ADJUST_TARGET_LATERAL_DIST_M, dist_error)
+                    # 停止横向移动
+                    twist_msg.linear.y = 0.0
+                    
+                    if is_angle_correction_ok:
+                        # 姿态修正完成，转换到下一个状态
+                        rospy.loginfo("状态转换: ADJUST_LATERAL_POSITION -> DRIVE_TO_CENTER")
+                        self.stop()  # 立即停车确保平稳过渡
+                        
+                        # 重置状态标志，准备进入下一状态
+                        with self.data_lock:
+                            self.s3_dist_achieved = False
+                            self.is_angle_correction_ok = False
+                            self.s4_pos_achieved = False
+                            self.current_state = DRIVE_TO_CENTER
+                            
+                        # 立即发布停止指令并结束本次循环
+                        self.cmd_vel_pub.publish(Twist())
+                        return
+                    else:
+                        # 姿态修正中，使用固定的旋转速度
+                        twist_msg.angular.z = self.alignment_rotation_speed_rad
+                        rospy.loginfo_throttle(1, "状态: %s | 阶段B-姿态修正中 (使用严格角度阈值 ±%.1f°)", 
+                                             STATE_NAMES[self.current_state], CORRECTION_ANGLE_TOL_DEG)
         
         elif self.current_state == DRIVE_TO_CENTER:
-            # 从实例变量中安全地读取左侧板子的检测结果
+            # 从实例变量中安全地读取左侧板子的检测结果和内部状态标志
             with self.data_lock:
                 is_left_board_found = self.is_left_board_found
                 latest_board_center_x_m = self.latest_board_center_x_m
+                s4_pos_achieved = self.s4_pos_achieved
+                is_angle_correction_ok = self.is_angle_correction_ok
 
-            # 确保twist_msg的横向和旋转速度为零
+            # 确保twist_msg的横向速度为零
             twist_msg.linear.y = 0.0
-            twist_msg.angular.z = 0.0
 
             if not is_left_board_found:
-                # 如果没有找到左侧板子，则停止直行并等待
-                rospy.loginfo_throttle(1, "状态: %s | 未检测到左侧板子，停止直行并等待...", STATE_NAMES[self.current_state])
+                # 如果没有找到左侧板子，则停止所有移动并等待
+                rospy.loginfo_throttle(1, "状态: %s | 未检测到左侧板子，停止移动并等待...", STATE_NAMES[self.current_state])
                 twist_msg.linear.x = 0.0
+                twist_msg.angular.z = 0.0
             else:
-                # 如果找到了左侧板子，则检查前后位置误差
-                pos_error = latest_board_center_x_m # 目标是让这个值为0
+                # 计算位置误差, 补偿雷达的物理安装偏移。
+                # 我们的目标是让机器人中心(base_link)对准板子中心。
+                # 这意味着当激光雷达(laser_frame)观测到的板子中心x坐标
+                # 等于雷达自身的x偏移量时，任务就完成了。
+                # 因此，误差 = 当前观测值 - 目标观测值
+                pos_error = latest_board_center_x_m - LIDAR_X_OFFSET_M
                 
-                if abs(pos_error) <= DRIVE_TO_CENTER_POS_TOL_M:
-                    # 已达到中心位置，停止
-                    rospy.loginfo_throttle(1, "状态: %s | 已到达入口板中心，最终停止 (位置误差: %.2fm)", 
-                                         STATE_NAMES[self.current_state], pos_error)
-                    twist_msg.linear.x = 0.0
+                # --- 阶段A: 移动阶段 ---
+                if not s4_pos_achieved:
+                    # 判断是否在容差范围内
+                    if abs(pos_error) <= DRIVE_TO_CENTER_POS_TOL_M:
+                        # 前后位置已达到目标，标记阶段A完成，进入阶段B
+                        rospy.loginfo("已到达入口板中心 (位置误差: %.2fm)，进入最终姿态锁定阶段", pos_error)
+                        with self.data_lock:
+                            self.s4_pos_achieved = True
+                            self.is_angle_correction_ok = False  # 重置姿态修正标志
+                        # 立即停止移动
+                        twist_msg.linear.x = 0.0
+                        twist_msg.angular.z = 0.0
+                    else:
+                        # 未达到中心位置，向前直行
+                        twist_msg.linear.x = DRIVE_TO_CENTER_SPEED_M_S
+                        twist_msg.angular.z = 0.0  # 确保不旋转
+                        rospy.loginfo_throttle(1, "状态: %s | 阶段A-前进中 (位置误差: %.2fm)", 
+                                             STATE_NAMES[self.current_state], pos_error)
+                
+                # --- 阶段B: 最终姿态锁定阶段 ---
                 else:
-                    # 未达到中心位置，向前直行
-                    twist_msg.linear.x = DRIVE_TO_CENTER_SPEED_M_S
-                    rospy.loginfo_throttle(1, "状态: %s | 向入口板中心行驶中 (位置误差: %.2fm)", 
-                                         STATE_NAMES[self.current_state], pos_error)
+                    # 停止前进
+                    twist_msg.linear.x = 0.0
+                    
+                    if is_angle_correction_ok:
+                        # 姿态修正完成，任务完成
+                        rospy.loginfo("任务完成: 位置和姿态均已精确对齐")
+                        self.stop()  # 立即停车
+                        
+                        # 重置状态标志（虽然已经完成，但为了代码健壮性）
+                        with self.data_lock:
+                            self.s4_pos_achieved = False
+                            self.is_angle_correction_ok = False
+                            
+                        # 立即发布停止指令并结束本次循环
+                        self.cmd_vel_pub.publish(Twist())
+                        return
+                    else:
+                        # 姿态修正中，使用固定的旋转速度
+                        twist_msg.angular.z = self.alignment_rotation_speed_rad
+                        rospy.loginfo_throttle(1, "状态: %s | 阶段B-最终姿态锁定中 (使用严格角度阈值 ±%.1f°)", 
+                                             STATE_NAMES[self.current_state], CORRECTION_ANGLE_TOL_DEG)
         
         # 发布最终确定的指令
         self.cmd_vel_pub.publish(twist_msg)
