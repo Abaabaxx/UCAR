@@ -482,14 +482,14 @@ class LineFollowerNode:
             start_search_x_left = (roi_w // 2) + HORIZONTAL_SEARCH_OFFSET
             for x in range(start_search_x_left, 0, -1):
                 if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x - 1] == 255:
-                    left_start_point = (x - 1, y)
+                    left_start_point = (x, y)
                     break
             
             # 寻找右起点 (使用FTW_right.py的逻辑)
             start_search_x_right = (roi_w // 2) - HORIZONTAL_SEARCH_OFFSET  # 相反偏移
             for x in range(start_search_x_right, roi_w - 1):
                 if binary_roi_frame[y, x] == 0 and binary_roi_frame[y, x + 1] == 255:
-                    right_start_point = (x + 1, y)
+                    right_start_point = (x, y)
                     break
             
             # 只有同时找到左右起点才认为有效
