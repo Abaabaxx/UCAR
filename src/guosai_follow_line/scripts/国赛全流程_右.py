@@ -108,7 +108,7 @@ AVOIDANCE_POINT_THRESHOLD = 10                         # 触发避障的点数�
 # 避障机动参数
 ODOM_TOPIC = "/odom"                                   # 里程计话题
 AVOIDANCE_STRAFE_OUTWARD_M = 0.5                      # 避障-外侧平移距离 (米)
-AVOIDANCE_STRAFE_INWARD_M = 0.45                       # 避障-内侧平移距离 (米)
+AVOIDANCE_STRAFE_INWARD_M = 0.465                       # 避障-内侧平移距离 (米)
 AVOIDANCE_FORWARD_DISTANCE_M = 0.58                     # 避障-前进距离 (米)
 AVOIDANCE_STRAFE_SPEED_MPS = 0.15                       # 避障-平移速度 (米/秒)
 AVOIDANCE_FORWARD_SPEED_MPS = 0.15                      # 避障-前进速度 (米/秒)
@@ -157,16 +157,16 @@ ALIGN_MIN_DIST_M = 0.2                  # 最小检测距离
 ALIGN_MAX_DIST_M = 3.0                  # 最大检测距离
 ALIGN_MIN_LENGTH_M = 1.35                # 板子最小长度
 ALIGN_MAX_LENGTH_M = 1.65                # 板子最大长度
-ALIGN_ANGLE_TOL_DEG = 4.0              # 与入口板平行时的角度容忍度 (度)
+ALIGN_ANGLE_TOL_DEG = 5.0              # 与入口板平行时的角度容忍度 (度)
 ALIGN_OBSERVATION_ANGLE_TOL_DEG = 20.0  # 与入口板平行时的观察角度容忍度 (度)
 
 # ==============================================================================
 # 状态三: ADJUST_LATERAL_POSITION (与左侧板保持距离)
 # ==============================================================================
 # --- 行为参数 ---
-ADJUST_TARGET_LATERAL_DIST_M = 1.98      # 与左侧板的目标横向距离 (米)
-ADJUST_LATERAL_SPEED_M_S = 0.1          # 横向平移速度 (米/秒)
-ADJUST_LATERAL_POS_TOL_M = 0.03         # 横向位置容差 (米)
+ADJUST_TARGET_LATERAL_DIST_M = 2.0      # 与左侧板的目标横向距离 (米)
+ADJUST_LATERAL_SPEED_M_S = 0.08          # 横向平移速度 (米/秒)
+ADJUST_LATERAL_POS_TOL_M = 0.02         # 横向位置容差 (米)
 
 # --- 检测参数 ---
 ADJUST_TARGET_ANGLE_DEG = 90.0          # 扫描中心: 左侧 (90度)
@@ -175,15 +175,15 @@ ADJUST_MIN_DIST_M = 0.2                 # 最小检测距离
 ADJUST_MAX_DIST_M = 3.0                 # 最大检测距离
 ADJUST_MIN_LENGTH_M = 1.35               # 板子最小长度 (米)
 ADJUST_MAX_LENGTH_M = 1.65               # 板子最大长度 (米)
-ADJUST_CORRECTION_ANGLE_TOL_DEG = 4.0   # 横向位置调整时的姿态修正角度容忍度 (度)
+ADJUST_CORRECTION_ANGLE_TOL_DEG = 2.0   # 横向位置调整时的姿态修正角度容忍度 (度)
 ADJUST_OBSERVATION_ANGLE_TOL_DEG = 20.0  # 横向位置调整时的观察角度容忍度 (度)
 
 # ==============================================================================
 # 状态四: DRIVE_TO_CENTER (直行到入口板中心)
 # ==============================================================================
 # --- 行为参数 ---
-DRIVE_TO_CENTER_SPEED_M_S = 0.1       # 直行速度 (米/秒)
-DRIVE_TO_CENTER_POS_TOL_M = 0.05      # 中心位置容差 (米)
+DRIVE_TO_CENTER_SPEED_M_S = 0.08       # 直行速度 (米/秒)
+DRIVE_TO_CENTER_POS_TOL_M = 0.02      # 中心位置容差 (米)
 
 # --- 检测参数 (右侧短板) ---
 # 注意：这里的参数与状态三不同，因为我们现在检测的是右侧的短板
@@ -193,8 +193,8 @@ DRIVE_TO_CENTER_MIN_DIST_M = 0.2          # 最小检测距离
 DRIVE_TO_CENTER_MAX_DIST_M = 1.5          # 最大检测距离
 DRIVE_TO_CENTER_MIN_LENGTH_M = 0.4        # 短板最小长度 (米)
 DRIVE_TO_CENTER_MAX_LENGTH_M = 0.6        # 短板最大长度 (米)
-DRIVE_TO_CENTER_CORRECTION_ANGLE_TOL_DEG = 4.0  # 直行到中心时的姿态修正角度容忍度 (度)
-DRIVE_TO_CENTER_OBSERVATION_ANGLE_TOL_DEG = 35.0  # 直行到中心时的观察角度容忍度 (度)
+DRIVE_TO_CENTER_CORRECTION_ANGLE_TOL_DEG = 2.0  # 直行到中心时的姿态修正角度容忍度 (度)
+DRIVE_TO_CENTER_OBSERVATION_ANGLE_TOL_DEG = 45.0  # 直行到中心时的观察角度容忍度 (度)
 
 # ==============================================================================
 # 状态五: DRIVE_IN_CIRCLE (环岛)
@@ -224,7 +224,7 @@ EXIT_MIN_DIST_M = 0.2                 # 最小检测距离
 EXIT_MAX_DIST_M = 1.5                 # 最大检测距离
 EXIT_MIN_LENGTH_M = 0.37               # 板子最小长度 (米)
 EXIT_MAX_LENGTH_M = 0.63               # 板子最大长度 (米)
-EXIT_ANGLE_TOL_DEG = 2.0              # 正对出口板时的角度容忍度 (度)
+EXIT_ANGLE_TOL_DEG = 4.0              # 正对出口板时的角度容忍度 (度)
 
 # ==============================================================================
 # 状态六-A: ALIGN_WITH_OBSTACLE_BOARD (对准前方的障碍物板)
