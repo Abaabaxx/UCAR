@@ -72,14 +72,10 @@ LOOKAHEAD_DISTANCE = 10  # 胡萝卜点与基准点的距离（像素）
 PRINT_HZ = 4  # 打印error的频率（次/秒）
 # 路径规划参数
 CENTER_LINE_OFFSET = 47  # 从左边线向右偏移的像素数
-# PID控制器参数
-Kp = 0.3  # 比例系数
-Ki = 0.0   # 积分系数
-Kd = 0.1   # 微分系数
 # 速度控制参数
 LINEAR_SPEED = 0.1  # 前进速度 (m/s)
 ERROR_DEADZONE_PIXELS = 15  # 误差死区（像素），低于此值则认为方向正确
-STEERING_TO_ANGULAR_VEL_RATIO = 0.02  # 转向角到角速度的转换系数
+LINE_FOLLOWING_ANGULAR_SPEED_DEG = 7.0 # 巡线时的固定转向角速度 (度/秒)
 MAX_ANGULAR_SPEED_DEG = 15.0  # 最大角速度（度/秒）
 
 # 逆透视变换矩阵（从鸟瞰图坐标到原始图像坐标的映射）
@@ -455,16 +451,13 @@ class LineFollowerNode:
         # 初始化cv_bridge
         self.bridge = CvBridge()
         
-        # 初始化PID和打印相关的状态变量
-        self.integral = 0.0
-        self.last_error = 0.0
+        # 初始化打印相关的状态变量
         self.last_print_time = time.time()
         
-        # 将最大角速度从度转换为弧度
+        # 将角速度从度转换为弧度
         self.max_angular_speed_rad = np.deg2rad(MAX_ANGULAR_SPEED_DEG)
-        
-        # 将对齐旋转速度从度转换为弧度
         self.alignment_rotation_speed_rad = np.deg2rad(ALIGNMENT_ROTATION_SPEED_DEG)
+        self.line_following_angular_speed_rad = np.deg2rad(LINE_FOLLOWING_ANGULAR_SPEED_DEG)
         
         # 计算正向透视变换矩阵
         try:
@@ -1826,27 +1819,12 @@ class LineFollowerNode:
         if abs(vision_error) > ERROR_DEADZONE_PIXELS:
             # 状态：原地旋转以修正方向
             twist_msg.linear.x = 0.0
-            
-            # 计算PID控制器的输出
-            p_term = Kp * vision_error
-            self.integral += vision_error
-            i_term = Ki * self.integral
-            derivative = vision_error - self.last_error
-            d_term = Kd * derivative
-            self.last_error = vision_error
-            steering_angle = p_term + i_term + d_term
-            
-            # 计算角速度并进行限幅
-            angular_z_rad = -1 * steering_angle * STEERING_TO_ANGULAR_VEL_RATIO
-            twist_msg.angular.z = np.clip(angular_z_rad, -self.max_angular_speed_rad, self.max_angular_speed_rad)
+            twist_msg.angular.z = -np.sign(vision_error) * self.line_following_angular_speed_rad
         
         else:
             # 状态：方向正确，直线前进
             twist_msg.linear.x = LINEAR_SPEED
             twist_msg.angular.z = 0.0
-            # 重置PID积分项和last_error
-            self.integral = 0.0
-            self.last_error = 0.0
         
         # 按指定频率打印error、线速度和角速度
         current_time = time.time()
