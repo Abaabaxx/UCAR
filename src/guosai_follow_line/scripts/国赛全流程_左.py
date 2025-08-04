@@ -26,20 +26,22 @@ rosservice call /follow_line/run "data: false"
 # --- 参数配置区 ---
 # 有限状态机（FSM）状态定义
 FOLLOW_LEFT = 0          # 状态一：沿左墙巡线
-ALIGN_WITH_ENTRANCE_BOARD = 1 # 状态二：旋转直到平行入口板
-ADJUST_LATERAL_POSITION = 2 # 状态三：横向调整位置
-DRIVE_TO_CENTER = 3       # 状态四：直行到入口板中心
-DRIVE_IN_CIRCLE = 4       # 状态五：环岛
-ROTATE_TO_FACE_EXIT_BOARD = 5 # 状态六：旋转正对出口板
-FOLLOW_LEFT_WITH_AVOIDANCE = 6 # 状态七：带避障巡线
-ALIGN_WITH_OBSTACLE_BOARD = 7 # 状态七-A：对准前方的障碍物板
-AVOIDANCE_MANEUVER = 8    # 状态八：执行避障机动
-FOLLOW_TO_FINISH = 9      # 状态九：最终冲刺巡线
-FINAL_STOP = 10           # 状态十：任务结束并停止
+STRAIGHT_TRANSITION = 1     # 新增状态：直行过渡
+ALIGN_WITH_ENTRANCE_BOARD = 2 # 状态二：旋转直到平行入口板
+ADJUST_LATERAL_POSITION = 3 # 状态三：横向调整位置
+DRIVE_TO_CENTER = 4       # 状态四：直行到入口板中心
+DRIVE_IN_CIRCLE = 5       # 状态五：环岛
+ROTATE_TO_FACE_EXIT_BOARD = 6 # 状态六：旋转正对出口板
+FOLLOW_LEFT_WITH_AVOIDANCE = 7 # 状态七：带避障巡线
+ALIGN_WITH_OBSTACLE_BOARD = 8 # 状态七-A：对准前方的障碍物板
+AVOIDANCE_MANEUVER = 9    # 状态八：执行避障机动
+FOLLOW_TO_FINISH = 10      # 状态九：最终冲刺巡线
+FINAL_STOP = 11           # 状态十：任务结束并停止
 
 # 状态名称映射（用于日志输出）
 STATE_NAMES = {
     FOLLOW_LEFT: "FOLLOW_LEFT",
+    STRAIGHT_TRANSITION: "STRAIGHT_TRANSITION",
     ALIGN_WITH_ENTRANCE_BOARD: "ROTATE_TO_PARALLEL",
     ADJUST_LATERAL_POSITION: "ADJUST_LATERAL_POSITION",
     DRIVE_TO_CENTER: "DRIVE_TO_CENTER",
@@ -94,6 +96,7 @@ IPM_ROI_W = 640  # ROI宽度
 # 特殊区域检测参数
 NORMAL_AREA_HEIGHT_FROM_BOTTOM = 50  # 从ROI底部算起，被视为"常规"的区域高度（像素）
 CONSECUTIVE_FRAMES_FOR_DETECTION = 3  # 连续可疑帧数，达到此值则确认进入
+STRAIGHT_TRANSITION_EXIT_FROM_BOTTOM_PX = 38 # 从ROI底部算起，小于此像素距离则退出直行
 
 # 激光雷达避障参数
 LIDAR_TOPIC = "/scan"                                  # 激光雷达话题名称
@@ -1240,7 +1243,16 @@ class LineFollowerNode:
             
             # 如果连续N帧都满足条件，则执行状态转换
             if self.consecutive_special_frames >= CONSECUTIVE_FRAMES_FOR_DETECTION:
-                rospy.loginfo("状态转换: FOLLOW_LEFT -> ALIGN_WITH_ENTRANCE_BOARD")
+                rospy.loginfo("状态转换: FOLLOW_LEFT -> STRAIGHT_TRANSITION")
+                self.stop() # 立即停车
+                self.current_state = STRAIGHT_TRANSITION
+                # 关键：立即发布停车指令并结束本次循环，避免执行旧状态的逻辑
+                self.cmd_vel_pub.publish(twist_msg)
+                return
+        
+        elif self.current_state == STRAIGHT_TRANSITION:
+            if is_line_found and line_y >= (IPM_ROI_H - STRAIGHT_TRANSITION_EXIT_FROM_BOTTOM_PX):
+                rospy.loginfo("状态转换: STRAIGHT_TRANSITION -> ALIGN_WITH_ENTRANCE_BOARD")
                 self.stop() # 立即停车
                 self.current_state = ALIGN_WITH_ENTRANCE_BOARD
                 # 重置所有内部阶段标志
@@ -1259,6 +1271,12 @@ class LineFollowerNode:
             else:
                 # 丢线则停止
                 self.stop()
+        
+        elif self.current_state == STRAIGHT_TRANSITION:
+            # 直行过渡
+            rospy.loginfo_throttle(1, "状态: %s | 直行过渡中...", STATE_NAMES[self.current_state])
+            twist_msg.linear.x = LINEAR_SPEED
+            twist_msg.angular.z = 0.0
         
         elif self.current_state == ALIGN_WITH_ENTRANCE_BOARD:
             if is_board_aligned:
@@ -1577,7 +1595,7 @@ class LineFollowerNode:
         # 全局丢线处理：如果丢线，则对于所有需要巡线的状态，都执行原地旋转搜索
         if not is_line_found:
             # 只有在需要巡线的状态下才旋转搜索
-            if self.current_state in [FOLLOW_LEFT, FOLLOW_LEFT_WITH_AVOIDANCE, FOLLOW_TO_FINISH, ALIGN_WITH_ENTRANCE_BOARD]:
+            if self.current_state in [FOLLOW_LEFT, STRAIGHT_TRANSITION, FOLLOW_LEFT_WITH_AVOIDANCE, FOLLOW_TO_FINISH]:
                 rospy.loginfo_throttle(1, "状态: %s | 丢线，开始原地旋转搜索...", STATE_NAMES[self.current_state])
                 twist_msg.linear.x = 0.0
                 twist_msg.angular.z = self.alignment_rotation_speed_rad  # 正号表示向左旋转
