@@ -8,7 +8,7 @@ from sensor_msgs.msg import Image, LaserScan
 from cv_bridge import CvBridge, CvBridgeError
 from std_srvs.srv import SetBool, SetBoolResponse
 from geometry_msgs.msg import Twist, Point
-from visualization_msgs.msg import Marker, MarkerArray
+
 from nav_msgs.msg import Odometry
 
 from threading import Lock
@@ -27,22 +27,18 @@ rosservice call /follow_line/run "data: false"
 # --- 参数配置区 ---
 # 有限状态机（FSM）状态定义
 FOLLOW_RIGHT = 0          # 状态一：沿右墙巡线
-ALIGN_WITH_ENTRANCE_BOARD = 1 # 状态二：旋转直到平行入口板
-ADJUST_LATERAL_POSITION = 2 # 状态三：横向调整位置
-DRIVE_TO_CENTER = 3       # 状态四：直行到入口板中心
-ROTATE_TO_FACE_EXIT_BOARD = 4 # 状态五：旋转正对出口板
-FOLLOW_RIGHT_WITH_AVOIDANCE = 5 # 状态六：带避障巡线
-ALIGN_WITH_OBSTACLE_BOARD = 6 # 状态六-A：在避障前对准障碍物板
-AVOIDANCE_MANEUVER = 7    # 状态七：执行避障机动
-FOLLOW_TO_FINISH = 8      # 状态八：最终冲刺巡线
-FINAL_STOP = 9           # 状态九：任务结束并停止
+STRAIGHT_TRANSITION = 1     # 状态二：直行过渡
+ROTATE_TO_FACE_EXIT_BOARD = 2 # 状态三：旋转正对出口板
+FOLLOW_RIGHT_WITH_AVOIDANCE = 3 # 状态四：带避障巡线
+ALIGN_WITH_OBSTACLE_BOARD = 4 # 状态五：在避障前对准障碍物板
+AVOIDANCE_MANEUVER = 5    # 状态六：执行避障机动
+FOLLOW_TO_FINISH = 6      # 状态七：最终冲刺巡线
+FINAL_STOP = 7           # 状态八：任务结束并停止
 
 # 状态名称映射（用于日志输出）
 STATE_NAMES = {
     FOLLOW_RIGHT: "FOLLOW_RIGHT",
-    ALIGN_WITH_ENTRANCE_BOARD: "ROTATE_TO_PARALLEL",
-    ADJUST_LATERAL_POSITION: "ADJUST_LATERAL_POSITION",
-    DRIVE_TO_CENTER: "DRIVE_TO_CENTER",
+    STRAIGHT_TRANSITION: "STRAIGHT_TRANSITION",
     ROTATE_TO_FACE_EXIT_BOARD: "ROTATE_TO_FACE_EXIT_BOARD",
     FOLLOW_RIGHT_WITH_AVOIDANCE: "FOLLOW_RIGHT_WITH_AVOIDANCE",
     ALIGN_WITH_OBSTACLE_BOARD: "ALIGN_WITH_OBSTACLE_BOARD",
@@ -69,16 +65,12 @@ START_POINT_SEARCH_MIN_Y = 120 # 允许寻找起始点的最低Y坐标(从顶部
 LOOKAHEAD_DISTANCE = 10  # 胡萝卜点与基准点的距离（像素）
 PRINT_HZ = 4  # 打印error的频率（次/秒）
 # 路径规划参数
-CENTER_LINE_OFFSET = -47  # 从右边线向左偏移的像素数
-# PID控制器参数
-Kp = 0.3  # 比例系数
-Ki = 0.0   # 积分系数
-Kd = 0.1   # 微分系数
+CENTER_LINE_OFFSET = -50  # 从右边线向左偏移的像素数
 # 速度控制参数
 LINEAR_SPEED = 0.1  # 前进速度 (m/s)
 ERROR_DEADZONE_PIXELS = 15  # 误差死区（像素），低于此值则认为方向正确
-STEERING_TO_ANGULAR_VEL_RATIO = 0.02  # 转向角到角速度的转换系数
-MAX_ANGULAR_SPEED_DEG = 15.0  # 最大角速度（度/秒）
+LINE_FOLLOWING_ANGULAR_SPEED_DEG = 10.0 # 巡线时的固定转向角速度 (度/秒)
+ALIGNMENT_ROTATION_SPEED_DEG = 10.0      # 旋转对齐时的角速度 (度/秒)
 
 # 逆透视变换矩阵（从鸟瞰图坐标到原始图像坐标的映射）
 INVERSE_PERSPECTIVE_MATRIX = np.array([
@@ -98,6 +90,7 @@ IPM_ROI_W = 640  # ROI宽度
 # 特殊区域检测参数
 NORMAL_AREA_HEIGHT_FROM_BOTTOM = 50  # 从ROI底部算起，被视为"常规"的区域高度（像素）
 CONSECUTIVE_FRAMES_FOR_DETECTION = 3  # 连续可疑帧数，达到此值则确认进入
+STRAIGHT_TRANSITION_EXIT_FROM_BOTTOM_PX = 45 # 从ROI底部算起，小于此像素距离则退出直行
 
 # 激光雷达避障参数
 LIDAR_TOPIC = "/scan"                                  # 激光雷达话题名称
@@ -107,7 +100,8 @@ AVOIDANCE_POINT_THRESHOLD = 10                         # 触发避障的点数�
 
 # 避障机动参数
 ODOM_TOPIC = "/odom"                                   # 里程计话题
-AVOIDANCE_STRAFE_DISTANCE_M = 0.5                      # 避障-平移距离 (米)
+AVOIDANCE_STRAFE_OUTWARD_M = 0.5                      # 避障-外侧平移距离 (米)
+AVOIDANCE_STRAFE_INWARD_M = 0.465                       # 避障-内侧平移距离 (米)
 AVOIDANCE_FORWARD_DISTANCE_M = 0.58                     # 避障-前进距离 (米)
 AVOIDANCE_STRAFE_SPEED_MPS = 0.15                       # 避障-平移速度 (米/秒)
 AVOIDANCE_FORWARD_SPEED_MPS = 0.15                      # 避障-前进速度 (米/秒)
@@ -143,60 +137,12 @@ FTW_SEEDS_RIGHT = [
     (-1, 1)     # 左下
 ]
 
-# ==============================================================================
-# 状态二: ALIGN_WITH_ENTRANCE_BOARD (与左侧入口板平行)
-# ==============================================================================
-# --- 行为参数 ---
-ALIGNMENT_ROTATION_SPEED_DEG = 7.0      # 旋转对齐时的角速度 (度/秒)
 
-# --- 检测参数 ---
-ALIGN_TARGET_ANGLE_DEG = 90.0           # 扫描中心: 左侧 (90度)
-ALIGN_SCAN_RANGE_DEG = 160.0             # 扫描范围: 中心±80度
-ALIGN_MIN_DIST_M = 0.2                  # 最小检测距离
-ALIGN_MAX_DIST_M = 3.0                  # 最大检测距离
-ALIGN_MIN_LENGTH_M = 1.35                # 板子最小长度
-ALIGN_MAX_LENGTH_M = 1.65                # 板子最大长度
-ALIGN_ANGLE_TOL_DEG = 4.0              # 与入口板平行时的角度容忍度 (度)
-ALIGN_OBSERVATION_ANGLE_TOL_DEG = 20.0  # 与入口板平行时的观察角度容忍度 (度)
+
+
 
 # ==============================================================================
-# 状态三: ADJUST_LATERAL_POSITION (与左侧板保持距离)
-# ==============================================================================
-# --- 行为参数 ---
-ADJUST_TARGET_LATERAL_DIST_M = 1.98      # 与左侧板的目标横向距离 (米)
-ADJUST_LATERAL_SPEED_M_S = 0.1          # 横向平移速度 (米/秒)
-ADJUST_LATERAL_POS_TOL_M = 0.03         # 横向位置容差 (米)
-
-# --- 检测参数 ---
-ADJUST_TARGET_ANGLE_DEG = 90.0          # 扫描中心: 左侧 (90度)
-ADJUST_SCAN_RANGE_DEG = 140.0            # 扫描范围: 中心±70度
-ADJUST_MIN_DIST_M = 0.2                 # 最小检测距离
-ADJUST_MAX_DIST_M = 3.0                 # 最大检测距离
-ADJUST_MIN_LENGTH_M = 1.35               # 板子最小长度 (米)
-ADJUST_MAX_LENGTH_M = 1.65               # 板子最大长度 (米)
-ADJUST_CORRECTION_ANGLE_TOL_DEG = 4.0   # 横向位置调整时的姿态修正角度容忍度 (度)
-ADJUST_OBSERVATION_ANGLE_TOL_DEG = 20.0  # 横向位置调整时的观察角度容忍度 (度)
-
-# ==============================================================================
-# 状态四: DRIVE_TO_CENTER (直行到入口板中心)
-# ==============================================================================
-# --- 行为参数 ---
-DRIVE_TO_CENTER_SPEED_M_S = 0.1       # 直行速度 (米/秒)
-DRIVE_TO_CENTER_POS_TOL_M = 0.05      # 中心位置容差 (米)
-
-# --- 检测参数 (右侧短板) ---
-# 注意：这里的参数与状态三不同，因为我们现在检测的是右侧的短板
-DRIVE_TO_CENTER_TARGET_ANGLE_DEG = -90.0  # 扫描中心: 右侧 (-90度)
-DRIVE_TO_CENTER_SCAN_RANGE_DEG = 180.0     # 扫描范围: 中心±90度
-DRIVE_TO_CENTER_MIN_DIST_M = 0.2          # 最小检测距离
-DRIVE_TO_CENTER_MAX_DIST_M = 1.5          # 最大检测距离
-DRIVE_TO_CENTER_MIN_LENGTH_M = 0.4        # 短板最小长度 (米)
-DRIVE_TO_CENTER_MAX_LENGTH_M = 0.6        # 短板最大长度 (米)
-DRIVE_TO_CENTER_CORRECTION_ANGLE_TOL_DEG = 4.0  # 直行到中心时的姿态修正角度容忍度 (度)
-DRIVE_TO_CENTER_OBSERVATION_ANGLE_TOL_DEG = 20.0  # 直行到中心时的观察角度容忍度 (度)
-
-# ==============================================================================
-# 状态五: ROTATE_TO_FACE_EXIT_BOARD (旋转正对出口板)
+# 状态三: ROTATE_TO_FACE_EXIT_BOARD (旋转正对出口板)
 # ==============================================================================
 # --- 检测参数 ---
 EXIT_TARGET_ANGLE_DEG = 0.0           # 扫描中心: 正前方 (0度)
@@ -205,10 +151,10 @@ EXIT_MIN_DIST_M = 0.2                 # 最小检测距离
 EXIT_MAX_DIST_M = 1.5                 # 最大检测距离
 EXIT_MIN_LENGTH_M = 0.37               # 板子最小长度 (米)
 EXIT_MAX_LENGTH_M = 0.63               # 板子最大长度 (米)
-EXIT_ANGLE_TOL_DEG = 2.0              # 正对出口板时的角度容忍度 (度)
+EXIT_ANGLE_TOL_DEG = 4.0              # 正对出口板时的角度容忍度 (度)
 
 # ==============================================================================
-# 状态六-A: ALIGN_WITH_OBSTACLE_BOARD (对准前方的障碍物板)
+# 状态四: ALIGN_WITH_OBSTACLE_BOARD (对准前方的障碍物板)
 # ==============================================================================
 ALIGN_OBSTACLE_TARGET_ANGLE_DEG = 0.0      # 扫描中心: 正前方 (0度)
 ALIGN_OBSTACLE_SCAN_RANGE_DEG = 120.0      # 扫描范围: 中心±60度
@@ -306,91 +252,7 @@ def extract_final_border(image_height, raw_points):
 
 
 class LineFollowerNode:
-    def _visualize_board_markers(self, scan_msg, cluster_array, center_x_m, lateral_error_m, coeffs, x_std, y_std, debug_marker_array):
-        """
-        可视化板子的中心点和法向量
-        """
-        # 1. 可视化中心点 (一个黄色的球体)
-        center_marker = Marker()
-        center_marker.header.frame_id = scan_msg.header.frame_id
-        center_marker.header.stamp = rospy.Time.now()
-        center_marker.ns = "debug_info_ns"
-        center_marker.id = 100 # 使用一个较大的ID，避免与聚类点冲突
-        center_marker.type = Marker.SPHERE
-        center_marker.action = Marker.ADD
-        
-        center_marker.pose.position.x = center_x_m
-        center_marker.pose.position.y = lateral_error_m
-        center_marker.pose.position.z = 0
-        center_marker.pose.orientation.w = 1.0
-        
-        center_marker.scale.x = 0.1
-        center_marker.scale.y = 0.1
-        center_marker.scale.z = 0.1
-        
-        center_marker.color.a = 1.0
-        center_marker.color.r = 1.0
-        center_marker.color.g = 1.0
-        center_marker.color.b = 0.0 # 黄色
-        
-        center_marker.lifetime = rospy.Duration(0.5)
-        debug_marker_array.markers.append(center_marker)
 
-        # 2. 可视化法向量 (一个从中心点出发的紫色箭头)
-        normal_marker = Marker()
-        normal_marker.header.frame_id = scan_msg.header.frame_id
-        normal_marker.header.stamp = rospy.Time.now()
-        normal_marker.ns = "debug_info_ns"
-        normal_marker.id = 101
-        normal_marker.type = Marker.ARROW
-        normal_marker.action = Marker.ADD
-
-        # 箭头的起点是聚类的中心
-        start_p = Point(x=center_x_m, y=lateral_error_m, z=0)
-
-        # 箭头的终点代表法向量方向
-        end_p = Point()
-        
-        # 根据拟合方向计算基础法向量
-        if coeffs is not None:
-            if x_std > y_std: # 拟合 y = mx + c
-                slope = coeffs[0]
-                # 法向量方向 (-slope, 1)
-                normal_vector = np.array([-slope, 1.0])
-            else: # 拟合 x = my + c
-                slope = coeffs[0]
-                # 法向量方向 (1, -slope)
-                normal_vector = np.array([1.0, -slope])
-
-            # 检查并确保法线指向外侧 (远离雷达原点)
-            lidar_to_center = np.array([center_x_m, lateral_error_m])
-            if np.dot(normal_vector, lidar_to_center) < 0:
-                normal_vector = -normal_vector # 翻转法线
-
-            # 归一化并设置箭头终点
-            norm = np.linalg.norm(normal_vector)
-            if norm > 1e-6:
-                unit_normal = normal_vector / norm
-                end_p.x = center_x_m + unit_normal[0] * 0.5 # 箭头长度0.5米
-                end_p.y = lateral_error_m + unit_normal[1] * 0.5
-                end_p.z = 0
-                
-                normal_marker.points.append(start_p)
-                normal_marker.points.append(end_p)
-        
-        normal_marker.scale.x = 0.02 # 箭杆直径
-        normal_marker.scale.y = 0.04 # 箭头宽度
-        
-        normal_marker.color.a = 1.0
-        normal_marker.color.r = 1.0
-        normal_marker.color.g = 0.0
-        normal_marker.color.b = 1.0 # 紫色
-
-        normal_marker.lifetime = rospy.Duration(0.5)
-        debug_marker_array.markers.append(normal_marker)
-        
-        # 发布调试标记
-        self.debug_markers_pub.publish(debug_marker_array)
     
     def __init__(self):
         # 初始化运行状态
@@ -408,16 +270,8 @@ class LineFollowerNode:
         self.is_line_found = False
         self.line_y_position = 0  # 用于状态转换判断
         self.latest_debug_image = np.zeros((IPM_ROI_H, IPM_ROI_W, 3), dtype=np.uint8)
-        self.is_board_aligned = False  # 用于标记是否已与板子平行
-        self.is_left_board_found = False  # 用于标记是否找到左侧板子
-        self.latest_lateral_error_m = 0.0  # 与左侧板子的当前距离
-        self.latest_board_center_x_m = 0.0 # 板子中心点的前后位置
-        
         # 初始化新的内部阶段标志
-        self.s3_dist_achieved = False      # 状态三：横向距离是否已达到
-        self.s4_pos_achieved = False       # 状态四：前进中心位置是否已达到
-        self.is_angle_correction_ok = False # 通用的姿态修正成功标志
-        self.is_exit_board_faced = False    # 状态五：是否已正对出口板
+        self.is_exit_board_faced = False    # 状态六：是否已正对出口板
         
         # 初始化状态机控制标志
         self.realign_cycle_completed = False
@@ -442,16 +296,12 @@ class LineFollowerNode:
         # 初始化cv_bridge
         self.bridge = CvBridge()
         
-        # 初始化PID和打印相关的状态变量
-        self.integral = 0.0
-        self.last_error = 0.0
+        # 初始化打印相关的状态变量
         self.last_print_time = time.time()
         
-        # 将最大角速度从度转换为弧度
-        self.max_angular_speed_rad = np.deg2rad(MAX_ANGULAR_SPEED_DEG)
-        
-        # 将对齐旋转速度从度转换为弧度
+        # 将角速度从度转换为弧度
         self.alignment_rotation_speed_rad = np.deg2rad(ALIGNMENT_ROTATION_SPEED_DEG)
+        self.line_following_angular_speed_rad = np.deg2rad(LINE_FOLLOWING_ANGULAR_SPEED_DEG)
         
         # 计算正向透视变换矩阵
         try:
@@ -471,10 +321,7 @@ class LineFollowerNode:
         # 创建速度指令发布者
         self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         
-        # 创建一个用于在RViz中可视化雷达聚类的发布者
-        self.clusters_pub = rospy.Publisher('/line_follower/lidar_clusters', MarkerArray, queue_size=10)
-        # 创建一个用于在RViz中可视化调试信息的发布者
-        self.debug_markers_pub = rospy.Publisher('/line_follower/debug_markers', MarkerArray, queue_size=10)
+
         
         # 创建运行状态控制服务
         self.run_service = rospy.Service('/follow_line/run', SetBool, self.handle_set_running)
@@ -620,14 +467,7 @@ class LineFollowerNode:
         参数和返回值与 _find_board 相同，但角度偏差带有符号。
         """
         try:
-            # 初始化调试MarkerArray
-            debug_marker_array = MarkerArray()
-            # 添加一个DELETEALL标记，以清除上一帧的调试标记
-            clear_marker = Marker()
-            clear_marker.id = 0
-            clear_marker.ns = "debug_info_ns"
-            clear_marker.action = Marker.DELETEALL
-            debug_marker_array.markers.append(clear_marker)
+
             
             # 1. 数据筛选：只考虑指定角度和距离范围内的点
             center_angle_rad = np.deg2rad(target_angle_deg)
@@ -676,50 +516,7 @@ class LineFollowerNode:
             if len(current_cluster) >= BOARD_DETECT_MIN_CLUSTER_PTS:
                 clusters.append(current_cluster)
             
-            # --- [开始] 可视化所有找到的聚类 ---
-            marker_array = MarkerArray()
 
-            # 1. 创建一个特殊的Marker用于清除上一帧的所有标记
-            clear_marker = Marker()
-            clear_marker.id = 0
-            clear_marker.ns = "lidar_clusters_ns" # 使用一个命名空间
-            clear_marker.action = Marker.DELETEALL
-            marker_array.markers.append(clear_marker)
-
-            # 2. 遍历所有找到的聚类，并为每一个都创建一个可视化标记
-            for i, cluster in enumerate(clusters):
-                marker = Marker()
-                marker.header.frame_id = scan_msg.header.frame_id
-                marker.header.stamp = rospy.Time.now()
-                marker.ns = "lidar_clusters_ns"
-                marker.id = i + 1 # ID 0 已被DELETEALL使用
-                marker.type = Marker.POINTS  # 将每个聚类显示为一组点
-                marker.action = Marker.ADD
-
-                marker.pose.orientation.w = 1.0
-                
-                # 设置点的大小
-                marker.scale.x = 0.03
-                marker.scale.y = 0.03
-
-                # 根据聚类的索引号赋予不同颜色（红/绿交替）
-                marker.color.a = 1.0  # 不透明
-                marker.color.r = float(i % 2 == 0)
-                marker.color.g = float(i % 2 != 0)
-                marker.color.b = 0.0
-
-                marker.lifetime = rospy.Duration(0.5)
-
-                # 将聚类中的所有点添加到marker消息中
-                for x, y in cluster:
-                    p = Point(x=x, y=y, z=0)
-                    marker.points.append(p)
-                
-                marker_array.markers.append(marker)
-            
-            # 3. 在所有marker都准备好后，只发布一次MarkerArray
-            self.clusters_pub.publish(marker_array)
-            # --- [结束] 可视化代码 ---
             
             # 3. 聚类验证和角度检测
             for cluster in clusters:
@@ -774,10 +571,7 @@ class LineFollowerNode:
                         center_x_m = np.mean(cluster_array[:, 0])  # 前向距离（X轴）
                         lateral_error_m = np.mean(cluster_array[:, 1])  # 横向偏差（Y轴）
                         
-                        # 可视化中心点和法向量
-                        self._visualize_board_markers(scan_msg, cluster_array, center_x_m, lateral_error_m, 
-                                                   coeffs if 'coeffs' in locals() else None, 
-                                                   x_std, y_std, debug_marker_array)
+
                         
                         # 为日志记录计算base_link坐标
                         center_x_base_link = center_x_m + LIDAR_X_OFFSET_M
@@ -792,10 +586,7 @@ class LineFollowerNode:
                         center_x_m = np.mean(cluster_array[:, 0])  # 前向距离（X轴）
                         lateral_error_m = np.mean(cluster_array[:, 1])  # 横向偏差（Y轴）
                         
-                        # 可视化中心点和法向量
-                        self._visualize_board_markers(scan_msg, cluster_array, center_x_m, lateral_error_m, 
-                                                   coeffs if 'coeffs' in locals() else None, 
-                                                   x_std, y_std, debug_marker_array)
+
                         
                         # 为日志记录计算base_link坐标
                         center_x_base_link = center_x_m + LIDAR_X_OFFSET_M
@@ -830,14 +621,7 @@ class LineFollowerNode:
         tuple: (是否找到符合条件的板子, 中心点X坐标, 中心点Y坐标, 角度偏差)
         """
         try:
-            # 初始化调试MarkerArray
-            debug_marker_array = MarkerArray()
-            # 添加一个DELETEALL标记，以清除上一帧的调试标记
-            clear_marker = Marker()
-            clear_marker.id = 0
-            clear_marker.ns = "debug_info_ns"
-            clear_marker.action = Marker.DELETEALL
-            debug_marker_array.markers.append(clear_marker)
+
             
             # 1. 数据筛选：只考虑指定角度和距离范围内的点
             center_angle_rad = np.deg2rad(target_angle_deg)
@@ -885,51 +669,6 @@ class LineFollowerNode:
             # 不要忘记最后一个聚类
             if len(current_cluster) >= BOARD_DETECT_MIN_CLUSTER_PTS:
                 clusters.append(current_cluster)
-            
-            # --- [开始] 可视化所有找到的聚类 ---
-            marker_array = MarkerArray()
-
-            # 1. 创建一个特殊的Marker用于清除上一帧的所有标记
-            clear_marker = Marker()
-            clear_marker.id = 0
-            clear_marker.ns = "lidar_clusters_ns" # 使用一个命名空间
-            clear_marker.action = Marker.DELETEALL
-            marker_array.markers.append(clear_marker)
-
-            # 2. 遍历所有找到的聚类，并为每一个都创建一个可视化标记
-            for i, cluster in enumerate(clusters):
-                marker = Marker()
-                marker.header.frame_id = scan_msg.header.frame_id
-                marker.header.stamp = rospy.Time.now()
-                marker.ns = "lidar_clusters_ns"
-                marker.id = i + 1 # ID 0 已被DELETEALL使用
-                marker.type = Marker.POINTS  # 将每个聚类显示为一组点
-                marker.action = Marker.ADD
-
-                marker.pose.orientation.w = 1.0
-                
-                # 设置点的大小
-                marker.scale.x = 0.03
-                marker.scale.y = 0.03
-
-                # 根据聚类的索引号赋予不同颜色（红/绿交替）
-                marker.color.a = 1.0  # 不透明
-                marker.color.r = float(i % 2 == 0)
-                marker.color.g = float(i % 2 != 0)
-                marker.color.b = 0.0
-
-                marker.lifetime = rospy.Duration(0.5)
-
-                # 将聚类中的所有点添加到marker消息中
-                for x, y in cluster:
-                    p = Point(x=x, y=y, z=0)
-                    marker.points.append(p)
-                
-                marker_array.markers.append(marker)
-            
-            # 3. 在所有marker都准备好后，只发布一次MarkerArray
-            self.clusters_pub.publish(marker_array)
-            # --- [结束] 可视化代码 ---
             
             # 3. 聚类验证和角度检测
             for cluster in clusters:
@@ -979,10 +718,7 @@ class LineFollowerNode:
                         center_x_m = np.mean(cluster_array[:, 0])  # 前向距离（X轴）
                         lateral_error_m = np.mean(cluster_array[:, 1])  # 横向偏差（Y轴）
                         
-                        # 可视化中心点和法向量
-                        self._visualize_board_markers(scan_msg, cluster_array, center_x_m, lateral_error_m, 
-                                                    coeffs if 'coeffs' in locals() else None, 
-                                                    x_std, y_std, debug_marker_array)
+                        
                         
                         # 为日志记录计算base_link坐标
                         center_x_base_link = center_x_m + LIDAR_X_OFFSET_M
@@ -997,10 +733,7 @@ class LineFollowerNode:
                         center_x_m = np.mean(cluster_array[:, 0])  # 前向距离（X轴）
                         lateral_error_m = np.mean(cluster_array[:, 1])  # 横向偏差（Y轴）
                         
-                        # 可视化中心点和法向量
-                        self._visualize_board_markers(scan_msg, cluster_array, center_x_m, lateral_error_m, 
-                                                    coeffs if 'coeffs' in locals() else None, 
-                                                    x_std, y_std, debug_marker_array)
+                        
                         
                         # 为日志记录计算base_link坐标
                         center_x_base_link = center_x_m + LIDAR_X_OFFSET_M
@@ -1027,84 +760,8 @@ class LineFollowerNode:
         # 1. 安全地读取当前状态
         with self.data_lock:
             current_state = self.current_state
-            s3_dist_achieved = self.s3_dist_achieved
-            s4_pos_achieved = self.s4_pos_achieved
         
-        if current_state == ALIGN_WITH_ENTRANCE_BOARD:
-            # 左侧入口板检测（状态二）
-            board_found, board_center_x, board_center_y, _ = self._find_board(
-                msg, 
-                ALIGN_TARGET_ANGLE_DEG,
-                ALIGN_SCAN_RANGE_DEG,
-                'PARALLEL',
-                ALIGN_MIN_DIST_M,
-                ALIGN_MAX_DIST_M,
-                ALIGN_MIN_LENGTH_M,
-                ALIGN_MAX_LENGTH_M,
-                ALIGN_ANGLE_TOL_DEG  # 使用状态二的专属角度阈值
-            )
-            
-            # 更新共享状态
-            with self.data_lock:
-                self.is_board_aligned = board_found
-                
-        elif current_state == ADJUST_LATERAL_POSITION:
-            # 始终使用宽容的"观察阈值"来寻找和跟踪板子
-            board_found, board_center_x, board_center_y, board_angle_dev = self._find_board(
-                msg,
-                ADJUST_TARGET_ANGLE_DEG,
-                ADJUST_SCAN_RANGE_DEG,
-                'PARALLEL',
-                ADJUST_MIN_DIST_M,
-                ADJUST_MAX_DIST_M,
-                ADJUST_MIN_LENGTH_M,
-                ADJUST_MAX_LENGTH_M,
-                ADJUST_OBSERVATION_ANGLE_TOL_DEG  # 使用状态三的观察角度阈值
-            )
-            
-            # 更新共享状态
-            with self.data_lock:
-                self.is_left_board_found = board_found
-                self.latest_lateral_error_m = board_center_y
-                
-                # 如果在姿态修正阶段 (阶段B)，则需要检查角度是否已达到严格目标
-                if s3_dist_achieved:
-                    if board_found and board_angle_dev <= ADJUST_CORRECTION_ANGLE_TOL_DEG:
-                        # 找到了板子，并且其角度在严格阈值(9°)内
-                        self.is_angle_correction_ok = True
-                    else:
-                        # 没找到板子，或找到了但角度未达标
-                        self.is_angle_correction_ok = False
-                
-        elif current_state == DRIVE_TO_CENTER:
-            # 同样，始终使用宽容的"观察阈值"来寻找和跟踪板子
-            board_found, board_center_x, board_center_y, board_angle_dev = self._find_board(
-                msg,
-                DRIVE_TO_CENTER_TARGET_ANGLE_DEG,
-                DRIVE_TO_CENTER_SCAN_RANGE_DEG,
-                'PARALLEL',
-                DRIVE_TO_CENTER_MIN_DIST_M,
-                DRIVE_TO_CENTER_MAX_DIST_M,
-                DRIVE_TO_CENTER_MIN_LENGTH_M,
-                DRIVE_TO_CENTER_MAX_LENGTH_M,
-                DRIVE_TO_CENTER_OBSERVATION_ANGLE_TOL_DEG  # 使用状态四的观察角度阈值
-            )
-            
-            # 更新共享状态
-            with self.data_lock:
-                self.is_left_board_found = board_found # 复用找到板子的标志
-                self.latest_board_center_x_m = board_center_x
-                
-                # 如果在最终姿态锁定阶段 (阶段B)，则需要检查角度是否已达到严格目标
-                if s4_pos_achieved:
-                    if board_found and board_angle_dev <= DRIVE_TO_CENTER_CORRECTION_ANGLE_TOL_DEG:
-                        # 找到了板子，并且其角度在严格阈值(9°)内
-                        self.is_angle_correction_ok = True
-                    else:
-                        # 没找到板子，或找到了但角度未达标
-                        self.is_angle_correction_ok = False
-                        
-        elif current_state == ROTATE_TO_FACE_EXIT_BOARD:
+        if current_state == ROTATE_TO_FACE_EXIT_BOARD:
             # 寻找正前方的垂直板子
             board_found, board_center_x, board_center_y, board_angle_dev = self._find_board(
                 msg,
@@ -1330,7 +987,6 @@ class LineFollowerNode:
             vision_error = self.latest_vision_error
             line_y = self.line_y_position
             debug_image = self.latest_debug_image.copy()
-            is_board_aligned = self.is_board_aligned
             is_exit_board_faced = self.is_exit_board_faced
             is_obstacle_board_locked = self.is_obstacle_board_locked
             obstacle_board_angle_error_deg = self.obstacle_board_angle_error_deg
@@ -1362,8 +1018,8 @@ class LineFollowerNode:
 
             # 根据当前步骤执行相应动作
             if self.maneuver_step == 0: # 步骤0: 向右平移
-                rospy.loginfo_throttle(1.0, "避障步骤0: 向右平移... (%.2f / %.2f m)", distance_moved, AVOIDANCE_STRAFE_DISTANCE_M)
-                if distance_moved < AVOIDANCE_STRAFE_DISTANCE_M:
+                rospy.loginfo_throttle(1.0, "避障步骤0: 向右平移... (%.2f / %.2f m)", distance_moved, AVOIDANCE_STRAFE_OUTWARD_M)
+                if distance_moved < AVOIDANCE_STRAFE_OUTWARD_M:
                     twist_msg.linear.y = -AVOIDANCE_STRAFE_SPEED_MPS
                 else:
                     self.stop()
@@ -1382,8 +1038,8 @@ class LineFollowerNode:
                     self.maneuver_initial_pose = None # 重置
             
             elif self.maneuver_step == 2: # 步骤2: 向左平移
-                rospy.loginfo_throttle(1.0, "避障步骤2: 向左平移... (%.2f / %.2f m)", distance_moved, AVOIDANCE_STRAFE_DISTANCE_M)
-                if distance_moved < AVOIDANCE_STRAFE_DISTANCE_M:
+                rospy.loginfo_throttle(1.0, "避障步骤2: 向左平移... (%.2f / %.2f m)", distance_moved, AVOIDANCE_STRAFE_INWARD_M)
+                if distance_moved < AVOIDANCE_STRAFE_INWARD_M:
                     twist_msg.linear.y = AVOIDANCE_STRAFE_SPEED_MPS # 正号表示向左
                 else:
                     self.stop()
@@ -1397,8 +1053,8 @@ class LineFollowerNode:
             maneuver_display = np.zeros((IPM_ROI_H, IPM_ROI_W, 3), dtype=np.uint8)
             cv2.putText(maneuver_display, "AVOIDANCE MANEUVER - STEP: {}".format(self.maneuver_step), 
                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            cv2.putText(maneuver_display, "Distance: {:.2f}/{:.2f}m".format(distance_moved, 
-                       AVOIDANCE_STRAFE_DISTANCE_M if self.maneuver_step != 1 else AVOIDANCE_FORWARD_DISTANCE_M), 
+            cv2.putText(maneuver_display, "Distance: {:.2f}/{:.2f}m".format(distance_moved,
+                       AVOIDANCE_STRAFE_OUTWARD_M if self.maneuver_step == 0 else (AVOIDANCE_STRAFE_INWARD_M if self.maneuver_step == 2 else AVOIDANCE_FORWARD_DISTANCE_M)), 
                        (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             debug_image = maneuver_display
             
@@ -1421,13 +1077,18 @@ class LineFollowerNode:
             
             # 如果连续N帧都满足条件，则执行状态转换
             if self.consecutive_special_frames >= CONSECUTIVE_FRAMES_FOR_DETECTION:
-                rospy.loginfo("状态转换: FOLLOW_RIGHT -> ALIGN_WITH_ENTRANCE_BOARD")
+                rospy.loginfo("状态转换: FOLLOW_RIGHT -> STRAIGHT_TRANSITION")
                 self.stop() # 立即停车
-                self.current_state = ALIGN_WITH_ENTRANCE_BOARD
-                # 重置所有内部阶段标志
-                self.s3_dist_achieved = False
-                self.s4_pos_achieved = False
-                self.is_angle_correction_ok = False
+                self.current_state = STRAIGHT_TRANSITION
+                # 关键：立即发布停车指令并结束本次循环，避免执行旧状态的逻辑
+                self.cmd_vel_pub.publish(twist_msg)
+                return
+        
+        elif self.current_state == STRAIGHT_TRANSITION:
+            if is_line_found and line_y >= (IPM_ROI_H - STRAIGHT_TRANSITION_EXIT_FROM_BOTTOM_PX):
+                rospy.loginfo("状态转换: STRAIGHT_TRANSITION -> ROTATE_TO_FACE_EXIT_BOARD")
+                self.stop() # 立即停车
+                self.current_state = ROTATE_TO_FACE_EXIT_BOARD
                 # 关键：立即发布停车指令并结束本次循环，避免执行旧状态的逻辑
                 self.cmd_vel_pub.publish(twist_msg)
                 return
@@ -1440,156 +1101,12 @@ class LineFollowerNode:
             else:
                 # 丢线则停止
                 self.stop()
-        
-        elif self.current_state == ALIGN_WITH_ENTRANCE_BOARD:
-            if is_board_aligned:
-                # 如果已对齐，则停止并转换到下一个状态
-                rospy.loginfo("状态转换: ALIGN_WITH_ENTRANCE_BOARD -> ADJUST_LATERAL_POSITION")
-                twist_msg.linear.x = 0.0
-                twist_msg.angular.z = 0.0
-                self.current_state = ADJUST_LATERAL_POSITION
-                # 发布停止指令并结束本次循环
-                self.cmd_vel_pub.publish(twist_msg)
-                return
-            else:
-                # 如果未对齐，则向左旋转
-                rospy.loginfo_throttle(1, "状态: %s | 未检测到平行入口板，向左旋转...", STATE_NAMES[self.current_state])
-                twist_msg.linear.x = 0.0
-                twist_msg.angular.z = self.alignment_rotation_speed_rad
-        
-        elif self.current_state == ADJUST_LATERAL_POSITION:
-            # 从实例变量中安全地读取左侧板子的检测结果和内部状态标志
-            with self.data_lock:
-                is_left_board_found = self.is_left_board_found
-                latest_lateral_error_m = self.latest_lateral_error_m
-                s3_dist_achieved = self.s3_dist_achieved
-                is_angle_correction_ok = self.is_angle_correction_ok
-            
-            # 确保twist_msg的前进速度为零
-            twist_msg.linear.x = 0.0
-            
-            if not is_left_board_found:
-                # 如果没有找到左侧板子，则停止所有移动并等待
-                rospy.loginfo_throttle(1, "状态: %s | 未检测到左侧板子，停止移动并等待...", STATE_NAMES[self.current_state])
-                twist_msg.linear.y = 0.0
-                twist_msg.angular.z = 0.0
-            else:
-                # 计算距离误差
-                dist_error = latest_lateral_error_m - ADJUST_TARGET_LATERAL_DIST_M
-                
-                # --- 阶段A: 移动阶段 ---
-                if not s3_dist_achieved:
-                    # 判断是否在容差范围内
-                    if abs(dist_error) <= ADJUST_LATERAL_POS_TOL_M:
-                        # 横向距离已达到目标，标记阶段A完成，进入阶段B
-                        rospy.loginfo("横向距离已达到目标 (%.2fm)，进入姿态修正阶段", latest_lateral_error_m)
-                        with self.data_lock:
-                            self.s3_dist_achieved = True
-                            self.is_angle_correction_ok = False  # 重置姿态修正标志
-                        # 立即停止移动
-                        twist_msg.linear.y = 0.0
-                        twist_msg.angular.z = 0.0
-                    else:
-                        # 未达到目标位置，计算横向速度
-                        twist_msg.linear.y = np.sign(dist_error) * ADJUST_LATERAL_SPEED_M_S
-                        twist_msg.angular.z = 0.0  # 确保不旋转
-                        rospy.loginfo_throttle(1, "状态: %s | 阶段A-移动中 (当前距离: %.2fm, 目标距离: %.2fm, 误差: %.2fm)", 
-                                             STATE_NAMES[self.current_state], latest_lateral_error_m, 
-                                             ADJUST_TARGET_LATERAL_DIST_M, dist_error)
-                
-                # --- 阶段B: 姿态修正阶段 ---
-                else:
-                    # 停止横向移动
-                    twist_msg.linear.y = 0.0
-                    
-                    if is_angle_correction_ok:
-                        # 姿态修正完成，转换到下一个状态
-                        rospy.loginfo("状态转换: ADJUST_LATERAL_POSITION -> DRIVE_TO_CENTER")
-                        self.stop()  # 立即停车确保平稳过渡
-                        
-                        # 重置状态标志，准备进入下一状态
-                        with self.data_lock:
-                            self.s3_dist_achieved = False
-                            self.is_angle_correction_ok = False
-                            self.s4_pos_achieved = False
-                            self.current_state = DRIVE_TO_CENTER
-                            
-                        # 立即发布停止指令并结束本次循环
-                        self.cmd_vel_pub.publish(Twist())
-                        return
-                    else:
-                        # 姿态修正中，使用固定的旋转速度
-                        twist_msg.angular.z = self.alignment_rotation_speed_rad
-                        rospy.loginfo_throttle(1, "状态: %s | 阶段B-姿态修正中 (使用严格角度阈值 ±%.1f°)", 
-                                             STATE_NAMES[self.current_state], ADJUST_CORRECTION_ANGLE_TOL_DEG)
-        
-        elif self.current_state == DRIVE_TO_CENTER:
-            # 从实例变量中安全地读取左侧板子的检测结果和内部状态标志
-            with self.data_lock:
-                is_left_board_found = self.is_left_board_found
-                latest_board_center_x_m = self.latest_board_center_x_m
-                s4_pos_achieved = self.s4_pos_achieved
-                is_angle_correction_ok = self.is_angle_correction_ok
 
-            # 确保twist_msg的横向速度为零
-            twist_msg.linear.y = 0.0
-
-            if not is_left_board_found:
-                # 如果没有找到右侧短板，则停止所有移动并等待
-                rospy.loginfo_throttle(1, "状态: %s | 未检测到右侧短板，停止移动并等待...", STATE_NAMES[self.current_state])
-                twist_msg.linear.x = 0.0
-                twist_msg.angular.z = 0.0
-            else:
-                # 计算位置误差, 补偿雷达的物理安装偏移。
-                # 我们的目标是让机器人中心(base_link)对准右侧短板的中心。
-                # 正确的计算: (激光雷达的读数) + (激光雷达的位置) = 板子相对于机器人中心的位置
-                # 误差 = 板子相对于机器人中心的位置 - 目标位置(0)
-                rospy.loginfo_throttle(1, "状态: %s | 基于右侧短板进行修正", STATE_NAMES[self.current_state])
-                pos_error = latest_board_center_x_m + LIDAR_X_OFFSET_M  # 加上偏移量（因为LIDAR_X_OFFSET_M已经是负值）
-                
-                # --- 阶段A: 移动阶段 ---
-                if not s4_pos_achieved:
-                    # 判断是否在容差范围内
-                    if abs(pos_error) <= DRIVE_TO_CENTER_POS_TOL_M:
-                        # 前后位置已达到目标，标记阶段A完成，进入阶段B
-                        rospy.loginfo("已到达入口板中心 (位置误差: %.2fm)，进入最终姿态锁定阶段", pos_error)
-                        with self.data_lock:
-                            self.s4_pos_achieved = True
-                            self.is_angle_correction_ok = False  # 重置姿态修正标志
-                        # 立即停止移动
-                        twist_msg.linear.x = 0.0
-                        twist_msg.angular.z = 0.0
-                    else:
-                        # 根据误差符号决定前进或后退，但速度恒定
-                        twist_msg.linear.x = np.sign(pos_error) * DRIVE_TO_CENTER_SPEED_M_S
-                        twist_msg.angular.z = 0.0  # 确保不旋转
-                        rospy.loginfo_throttle(1, "状态: %s | 阶段A-移动中 (位置误差: %.2fm)", 
-                                             STATE_NAMES[self.current_state], pos_error)
-                
-                # --- 阶段B: 最终姿态锁定阶段 ---
-                else:
-                    # 停止前进
-                    twist_msg.linear.x = 0.0
-                    
-                    if is_angle_correction_ok:
-                        # 姿态修正完成，转换到下一个状态
-                        rospy.loginfo("状态转换: DRIVE_TO_CENTER -> ROTATE_TO_FACE_EXIT_BOARD")
-                        self.stop()  # 立即停车确保平稳过渡
-                        
-                        # 重置状态标志，准备进入下一状态
-                        with self.data_lock:
-                            self.s4_pos_achieved = False
-                            self.is_angle_correction_ok = False
-                            self.current_state = ROTATE_TO_FACE_EXIT_BOARD
-                            
-                        # 立即发布停止指令并结束本次循环
-                        self.cmd_vel_pub.publish(Twist())
-                        return
-                    else:
-                        # 姿态修正中，使用固定的旋转速度
-                        twist_msg.angular.z = self.alignment_rotation_speed_rad
-                        rospy.loginfo_throttle(1, "状态: %s | 阶段B-最终姿态锁定中 (使用严格角度阈值 ±%.1f°)", 
-                                             STATE_NAMES[self.current_state], DRIVE_TO_CENTER_CORRECTION_ANGLE_TOL_DEG)
+        elif self.current_state == STRAIGHT_TRANSITION:
+            # 直行过渡
+            rospy.loginfo_throttle(1, "状态: %s | 直行过渡中...", STATE_NAMES[self.current_state])
+            twist_msg.linear.x = LINEAR_SPEED
+            twist_msg.angular.z = 0.0
         
         elif self.current_state == ROTATE_TO_FACE_EXIT_BOARD:
             # 从实例变量中安全地读取出口板子的检测结果
@@ -1701,7 +1218,7 @@ class LineFollowerNode:
         # 全局丢线处理：如果丢线，则对于所有需要巡线的状态，都执行原地旋转搜索
         if not is_line_found:
             # 只有在需要巡线的状态下才旋转搜索
-            if self.current_state in [FOLLOW_RIGHT, FOLLOW_RIGHT_WITH_AVOIDANCE, FOLLOW_TO_FINISH, ALIGN_WITH_ENTRANCE_BOARD]:
+            if self.current_state in [FOLLOW_RIGHT, FOLLOW_RIGHT_WITH_AVOIDANCE, FOLLOW_TO_FINISH]:
                 rospy.loginfo_throttle(1, "状态: %s | 丢线，开始原地旋转搜索...", STATE_NAMES[self.current_state])
                 twist_msg.linear.x = 0.0
                 twist_msg.angular.z = -self.alignment_rotation_speed_rad  # 负号表示向右旋转
@@ -1731,27 +1248,12 @@ class LineFollowerNode:
         if abs(vision_error) > ERROR_DEADZONE_PIXELS:
             # 状态：原地旋转以修正方向
             twist_msg.linear.x = 0.0
-            
-            # 计算PID控制器的输出
-            p_term = Kp * vision_error
-            self.integral += vision_error
-            i_term = Ki * self.integral
-            derivative = vision_error - self.last_error
-            d_term = Kd * derivative
-            self.last_error = vision_error
-            steering_angle = p_term + i_term + d_term
-            
-            # 计算角速度并进行限幅
-            angular_z_rad = -1 * steering_angle * STEERING_TO_ANGULAR_VEL_RATIO
-            twist_msg.angular.z = np.clip(angular_z_rad, -self.max_angular_speed_rad, self.max_angular_speed_rad)
+            twist_msg.angular.z = -np.sign(vision_error) * self.line_following_angular_speed_rad
         
         else:
             # 状态：方向正确，直线前进
             twist_msg.linear.x = LINEAR_SPEED
             twist_msg.angular.z = 0.0
-            # 重置PID积分项和last_error
-            self.integral = 0.0
-            self.last_error = 0.0
         
         # 按指定频率打印error、线速度和角速度
         current_time = time.time()
