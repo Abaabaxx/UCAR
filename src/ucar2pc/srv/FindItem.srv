@@ -1,0 +1,7 @@
+# --- 请求部分 ---
+string item_to_find  # 我们要告诉电脑去仿真寻找什么物品
+
+---
+
+# --- 响应部分 ---
+string room_location # 电脑告诉我们物品在哪个房间
