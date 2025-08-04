@@ -75,8 +75,7 @@ CENTER_LINE_OFFSET = 47  # 从左边线向右偏移的像素数
 # 速度控制参数
 LINEAR_SPEED = 0.1  # 前进速度 (m/s)
 ERROR_DEADZONE_PIXELS = 15  # 误差死区（像素），低于此值则认为方向正确
-LINE_FOLLOWING_ANGULAR_SPEED_DEG = 7.0 # 巡线时的固定转向角速度 (度/秒)
-MAX_ANGULAR_SPEED_DEG = 15.0  # 最大角速度（度/秒）
+LINE_FOLLOWING_ANGULAR_SPEED_DEG = 10.0 # 巡线时的固定转向角速度 (度/秒)
 
 # 逆透视变换矩阵（从鸟瞰图坐标到原始图像坐标的映射）
 INVERSE_PERSPECTIVE_MATRIX = np.array([
@@ -144,7 +143,7 @@ FTW_SEEDS_RIGHT = [
 # 状态二: ALIGN_WITH_ENTRANCE_BOARD (与右侧入口板平行)
 # ==============================================================================
 # --- 行为参数 ---
-ALIGNMENT_ROTATION_SPEED_DEG = 7.0      # 旋转对齐时的角速度 (度/秒)
+ALIGNMENT_ROTATION_SPEED_DEG = 10.0      # 旋转对齐时的角速度 (度/秒)
 
 # --- 检测参数 ---
 ALIGN_TARGET_ANGLE_DEG = -90.0           # 扫描中心: 右侧 (-90度)
@@ -455,7 +454,6 @@ class LineFollowerNode:
         self.last_print_time = time.time()
         
         # 将角速度从度转换为弧度
-        self.max_angular_speed_rad = np.deg2rad(MAX_ANGULAR_SPEED_DEG)
         self.alignment_rotation_speed_rad = np.deg2rad(ALIGNMENT_ROTATION_SPEED_DEG)
         self.line_following_angular_speed_rad = np.deg2rad(LINE_FOLLOWING_ANGULAR_SPEED_DEG)
         
