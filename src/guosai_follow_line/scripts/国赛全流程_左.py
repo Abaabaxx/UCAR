@@ -645,11 +645,6 @@ class LineFollowerNode:
                         center_x_m = np.mean(cluster_array[:, 0])  # 前向距离（X轴）
                         lateral_error_m = np.mean(cluster_array[:, 1])  # 横向偏差（Y轴）
                         
-                        # 可视化中心点和法向量
-                        self._visualize_board_markers(scan_msg, cluster_array, center_x_m, lateral_error_m, 
-                                                   coeffs if 'coeffs' in locals() else None, 
-                                                   x_std, y_std, debug_marker_array)
-                        
                         # 为日志记录计算base_link坐标
                         center_x_base_link = center_x_m + LIDAR_X_OFFSET_M
                         rospy.loginfo_throttle(2, "检测到平行板子: 中心点(机器人坐标系 x=%.2f, y=%.2f)m, 长度=%.2fm, 角度=%.1f度", 
