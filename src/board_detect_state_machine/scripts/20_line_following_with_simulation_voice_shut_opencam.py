@@ -972,7 +972,7 @@ class RobotStateMachine(object):
                 self.camera_process = subprocess.Popen(self.camera_line_following_launch_command)
                 rospy.loginfo("摄像头启动命令已发送，进程ID: %s", self.camera_process.pid)
                 # 启动后稍作等待，确保节点有时间初始化
-                rospy.sleep(2.0)
+                rospy.sleep(3.0)
                 self.transition(RobotState.LINE_FOLLOWING)
             except Exception as e:
                 rospy.logerr("启动摄像头launch文件失败: %s", str(e))
@@ -987,7 +987,7 @@ class RobotStateMachine(object):
     # 核心方法：事件处理
     def handle_event(self, event):
         if self.current_state == RobotState.IDLE and event == Event.START_CMD:
-            self.transition(RobotState.NAVIGATE_TO_UP_POINT)
+                self.transition(RobotState.NAVIGATE_TO_UP_POINT)
         elif self.current_state == RobotState.NAVIGATE_TO_UP_POINT:
             if event == Event.NAV_DONE_SUCCESS:
                 self.transition(RobotState.SEARCH_UP_BOARD)
