@@ -15,6 +15,6 @@
     <node pkg="xf_mic_asr_offline" type="voice_player.py" name="voice_player_node" output="screen" />   
 
     <!-- 状态机节点 -->
-    <node pkg="board_detect_state_machine" type="20_line_following_with_simulation.py" name="board_detect_state_machine_node" output="screen" /> 
+    <node pkg="board_detect_state_machine" type="20_line_following_with_simulation_voice_shut.py" name="board_detect_state_machine_node" output="screen" /> 
 
 </launch>
