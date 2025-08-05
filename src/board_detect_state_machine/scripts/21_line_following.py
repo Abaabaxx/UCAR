@@ -48,6 +48,8 @@ class RobotState(object):
     SHUTDOWN_FINAL_NODES = 19
     RELAUNCH_CAMERA_FOR_LINE_FOLLOWING = 20 # 新增：为巡线重启摄像头状态
     LINE_FOLLOWING = 21
+    SPEAK_FINAL = 22      # 新增：最终播报状态（空状态）
+    TASK_COMPLETE = 23    # 新增：任务完成状态
     ERROR = 99
 
 # 事件常量定义
@@ -67,6 +69,7 @@ class Event(object):
     LIGHT_DETECT_TIMEOUT = 12               # 新增：红绿灯检测超时事件
     NODES_SHUTDOWN_COMPLETE = 13             # 新增：YOLO节点成功关闭事件
     NODES_SHUTDOWN_TIMEOUT = 14              # 新增：YOLO节点关闭超时事件
+    LINE_FOLLOWING_DONE = 15                 # 新增：巡线完成事件
 
 # 主类框架
 class RobotStateMachine(object):
@@ -157,6 +160,11 @@ class RobotStateMachine(object):
         self.nodes_shutdown_check_timer = None
         self.nodes_shutdown_timeout_timer = None
         self.nodes_shutdown_timeout_duration = 5.0  # 关闭节点的总超时时间(秒)
+
+        # 新增：巡线状态控制相关变量
+        self.line_following_status_sub = None
+        self.line_following_timeout_timer = None
+        self.line_following_timeout = 300.0 # 巡线任务超时时间（5分钟）
 
         # 新增：仿真任务相关变量
         self.PC_IP = '192.168.68.206'  # 请确保这是您电脑的正确IP地址
@@ -794,6 +802,34 @@ class RobotStateMachine(object):
         # 触发节点关闭超时事件
         self.handle_event(Event.NODES_SHUTDOWN_TIMEOUT)
     
+    # 新增：处理巡线状态
+    def _line_following_status_callback(self, msg):
+        """处理巡线状态话题的回调"""
+        if msg.data == 'done':
+            rospy.loginfo("接收到巡线完成信号。")
+            
+            # 停止超时定时器和订阅者
+            if self.line_following_timeout_timer:
+                self.line_following_timeout_timer.shutdown()
+                self.line_following_timeout_timer = None
+            if self.line_following_status_sub:
+                self.line_following_status_sub.unregister()
+                self.line_following_status_sub = None
+                
+            self.handle_event(Event.LINE_FOLLOWING_DONE)
+
+    def _line_following_timeout_callback(self, event):
+        """处理巡线超时"""
+        rospy.logerr("巡线任务执行超时。")
+        
+        # 停止订阅者
+        if self.line_following_status_sub:
+            self.line_following_status_sub.unregister()
+            self.line_following_status_sub = None
+            
+        # 使用一个通用失败事件来触发错误状态
+        self.handle_event(Event.NAV_DONE_FAILURE)
+
     # 停止所有检测相关定时器
     def stop_search_timers(self):
         if self.search_monitor_timer is not None:
@@ -833,6 +869,14 @@ class RobotStateMachine(object):
         if self.nodes_shutdown_timeout_timer is not None:
             self.nodes_shutdown_timeout_timer.shutdown()
             self.nodes_shutdown_timeout_timer = None
+        
+        # 停止巡线相关活动
+        if self.line_following_timeout_timer:
+            self.line_following_timeout_timer.shutdown()
+            self.line_following_timeout_timer = None
+        if self.line_following_status_sub:
+            self.line_following_status_sub.unregister()
+            self.line_following_status_sub = None
         
         rospy.loginfo("已停止所有活动")
 
@@ -1007,11 +1051,26 @@ class RobotStateMachine(object):
                 rospy.loginfo("正在执行命令: python %s", script_to_run)
                 # 使用 Popen 启动脚本，不阻塞当前状态机
                 subprocess.Popen(["python", script_to_run])
-                rospy.loginfo("巡线脚本已启动。状态机任务完成。")
-                # 任务完成后，可以选择进入一个空闲循环或直接结束
+                rospy.loginfo("巡线脚本已启动。等待完成信号...")
+                
+                # 启动状态订阅者和超时定时器
+                self.line_following_status_sub = rospy.Subscriber(
+                    '/line_following_status', String, self._line_following_status_callback
+                )
+                self.line_following_timeout_timer = rospy.Timer(
+                    rospy.Duration(self.line_following_timeout),
+                    self._line_following_timeout_callback,
+                    oneshot=True
+                )
             except Exception as e:
                 rospy.logerr("启动巡线脚本失败: %s", str(e))
                 self.transition(RobotState.ERROR)
+        elif self.current_state == RobotState.SPEAK_FINAL:
+            rospy.loginfo("状态[SPEAK_FINAL]: 这是一个空状态，2秒后进入最终完成状态。")
+            rospy.Timer(rospy.Duration(2.0), lambda e: self.transition(RobotState.TASK_COMPLETE), oneshot=True)
+        elif self.current_state == RobotState.TASK_COMPLETE:
+            rospy.loginfo("全部任务完成！机器人将停止所有活动。")
+            self.stop_all_activities()
         elif self.current_state == RobotState.ERROR:
             rospy.logerr("错误状态，停止所有活动")
             self.stop_all_activities()
@@ -1019,8 +1078,8 @@ class RobotStateMachine(object):
     # 核心方法：事件处理
     def handle_event(self, event):
         if self.current_state == RobotState.IDLE and event == Event.START_CMD:
-                self.transition(RobotState.NAVIGATE_TO_UP_POINT)
-                # self.transition(RobotState.NAV_TO_TRAFFIC)
+                #self.transition(RobotState.NAVIGATE_TO_UP_POINT)
+                self.transition(RobotState.NAV_TO_TRAFFIC)
         elif self.current_state == RobotState.NAVIGATE_TO_UP_POINT:
             if event == Event.NAV_DONE_SUCCESS:
                 self.transition(RobotState.SEARCH_UP_BOARD)
@@ -1117,6 +1176,11 @@ class RobotStateMachine(object):
             if event == Event.NODES_SHUTDOWN_COMPLETE:
                 self.transition(RobotState.RELAUNCH_CAMERA_FOR_LINE_FOLLOWING)
             elif event == Event.NODES_SHUTDOWN_TIMEOUT:
+                self.transition(RobotState.ERROR)
+        elif self.current_state == RobotState.LINE_FOLLOWING:
+            if event == Event.LINE_FOLLOWING_DONE:
+                self.transition(RobotState.SPEAK_FINAL)
+            elif event == Event.NAV_DONE_FAILURE: # 复用事件表示超时
                 self.transition(RobotState.ERROR)
 
     # 服务回调：启动状态机
