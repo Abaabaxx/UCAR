@@ -8,6 +8,7 @@ from sensor_msgs.msg import Image, LaserScan
 from cv_bridge import CvBridge, CvBridgeError
 from std_srvs.srv import SetBool, SetBoolResponse
 from geometry_msgs.msg import Twist, Point
+from std_msgs.msg import String
 
 from nav_msgs.msg import Odometry
 
@@ -270,6 +271,8 @@ class LineFollowerNode:
         self.is_line_found = False
         self.line_y_position = 0  # 用于状态转换判断
         self.latest_debug_image = np.zeros((IPM_ROI_H, IPM_ROI_W, 3), dtype=np.uint8)
+        # 新增：状态发布者
+        self.status_pub = rospy.Publisher('/line_following_status', String, queue_size=1, latch=True)
         # 初始化新的内部阶段标志
         self.is_exit_board_faced = False    # 状态六：是否已正对出口板
         
@@ -1193,12 +1196,19 @@ class LineFollowerNode:
             twist_msg.linear.x = 0.0
             twist_msg.angular.z = 0.0
             
-            # 重置状态标志并结束任务
+            # 发布最终指令
+            self.cmd_vel_pub.publish(twist_msg)
+
+            # 重置状态标志，发送完成信号，并结束任务
             with self.data_lock:
-                self.is_running = False # 任务完成，彻底停止主循环
-                
-            # 立即发布停止指令并结束本次循环
-            self.cmd_vel_pub.publish(Twist())
+                if self.is_running: # 确保只执行一次
+                    rospy.loginfo("巡线任务完成，发送结束信号...")
+                    self.status_pub.publish("done")
+                    self.is_running = False # 任务完成，彻底停止主循环
+                    rospy.sleep(0.5) # 给予时间确保消息发布
+                    rospy.signal_shutdown("Line following task completed.")
+            
+            # 立即返回，避免执行后续指令
             return
         
         # 全局丢线处理：如果丢线，则对于所有需要巡线的状态，都执行原地旋转搜索
