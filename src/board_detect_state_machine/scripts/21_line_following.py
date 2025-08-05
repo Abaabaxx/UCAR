@@ -1066,8 +1066,21 @@ class RobotStateMachine(object):
                 rospy.logerr("启动巡线脚本失败: %s", str(e))
                 self.transition(RobotState.ERROR)
         elif self.current_state == RobotState.SPEAK_FINAL:
-            rospy.loginfo("状态[SPEAK_FINAL]: 这是一个空状态，2秒后进入最终完成状态。")
-            rospy.Timer(rospy.Duration(2.0), lambda e: self.transition(RobotState.TASK_COMPLETE), oneshot=True)
+            rospy.loginfo("状态[SPEAK_FINAL]: 准备进行最终任务播报...")
+            
+            item1 = self.found_good_name
+            item2 = self.simulation_found_item
+
+            if item1 and item2:
+                self.current_voice_cmd = "task_fin_{}_{}".format(item1, item2)
+                rospy.loginfo("构造最终播报命令: %s", self.current_voice_cmd)
+                self.voice_service_called = False
+                self.call_voice_service()
+            else:
+                rospy.logerr("无法执行最终播报，缺少物品信息: 巡检物品='%s', 仿真物品='%s'",
+                             item1, item2)
+                # 如果缺少信息，我们直接跳到完成状态，而不是报错
+                rospy.Timer(rospy.Duration(0.1), lambda e: self.transition(RobotState.TASK_COMPLETE), oneshot=True)
         elif self.current_state == RobotState.TASK_COMPLETE:
             rospy.loginfo("全部任务完成！机器人将停止所有活动。")
             self.stop_all_activities()
@@ -1078,8 +1091,8 @@ class RobotStateMachine(object):
     # 核心方法：事件处理
     def handle_event(self, event):
         if self.current_state == RobotState.IDLE and event == Event.START_CMD:
-                #self.transition(RobotState.NAVIGATE_TO_UP_POINT)
-                self.transition(RobotState.NAV_TO_TRAFFIC)
+                self.transition(RobotState.NAVIGATE_TO_UP_POINT)
+                # self.transition(RobotState.NAV_TO_TRAFFIC)
         elif self.current_state == RobotState.NAVIGATE_TO_UP_POINT:
             if event == Event.NAV_DONE_SUCCESS:
                 self.transition(RobotState.SEARCH_UP_BOARD)
@@ -1182,6 +1195,13 @@ class RobotStateMachine(object):
                 self.transition(RobotState.SPEAK_FINAL)
             elif event == Event.NAV_DONE_FAILURE: # 复用事件表示超时
                 self.transition(RobotState.ERROR)
+
+        elif self.current_state == RobotState.SPEAK_FINAL:
+            if event == Event.SPEAK_DONE:
+                self.transition(RobotState.TASK_COMPLETE)
+            elif event == Event.SPEAK_TIMEOUT:
+                rospy.logwarn("最终播报超时，直接进入完成状态。")
+                self.transition(RobotState.TASK_COMPLETE)
 
     # 服务回调：启动状态机
     def start_callback(self, req):
