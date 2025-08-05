@@ -67,7 +67,17 @@ class VoicePlayer:
                 "task_fin_tomato_chili": "task_fin/fin_tomato_chili.wav",
                 "task_fin_tomato_potato": "task_fin/fin_tomato_potato.wav",
                 "task_fin_watermelon_apple": "task_fin/fin_watermelon_apple.wav",
-                "task_fin_watermelon_banana": "task_fin/fin_watermelon_banana.wav"
+                "task_fin_watermelon_banana": "task_fin/fin_watermelon_banana.wav",
+                # --- 新增的重复物品播报 ---
+                "task_fin_apple_apple": "task_fin/fin_apple_apple.wav",
+                "task_fin_banana_banana": "task_fin/fin_banana_banana.wav",
+                "task_fin_watermelon_watermelon": "task_fin/fin_watermelon_watermelon.wav",
+                "task_fin_cake_cake": "task_fin/fin_cake_cake.wav",
+                "task_fin_coke_coke": "task_fin/fin_coke_coke.wav",
+                "task_fin_milk_milk": "task_fin/fin_milk_milk.wav",
+                "task_fin_chili_chili": "task_fin/fin_chili_chili.wav",
+                "task_fin_potato_potato": "task_fin/fin_potato_potato.wav",
+                "task_fin_tomato_tomato": "task_fin/fin_tomato_tomato.wav"
             }
             
             # 在开始加载文件前输出提示
