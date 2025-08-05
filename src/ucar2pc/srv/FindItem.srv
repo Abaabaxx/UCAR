@@ -1,7 +1,8 @@
 # --- 请求部分 ---
-string item_to_find  # 我们要告诉电脑去仿真寻找什么物品
+string item_to_find  # UCAR 告诉 PC 要找什么货物
 
 ---
 
 # --- 响应部分 ---
-string room_location # 电脑告诉我们物品在哪个房间
+string room_location # PC 返回货物所在房间
+string found_item_name # PC 返回货物的具体种类
