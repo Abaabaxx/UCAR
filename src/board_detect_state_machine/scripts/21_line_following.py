@@ -133,7 +133,7 @@ class RobotStateMachine(object):
             'desserts': ['milk', 'cake', 'cola'],
             'vegetables': ['pepper', 'potato', 'tomato']
         }
-        self.current_task = 'fruits'  # 默认任务
+        self.current_task = 'desserts'  # 默认任务
         self.yolo_confidence_threshold = 0.5 # YOLO识别的置信度阈值
         self.found_good_name = None   # 用于存储找到的货物名称
         
@@ -1091,9 +1091,10 @@ class RobotStateMachine(object):
     # 核心方法：事件处理
     def handle_event(self, event):
         if self.current_state == RobotState.IDLE and event == Event.START_CMD:
-                self.transition(RobotState.NAVIGATE_TO_UP_POINT)
-                # 这里配置初始阶段
+                # self.transition(RobotState.NAVIGATE_TO_UP_POINT)
+                # !!!!这里配置初始阶段
                 # self.transition(RobotState.NAV_TO_TRAFFIC)
+                self.transition(RobotState.NAV_TO_SIMULATION)
         elif self.current_state == RobotState.NAVIGATE_TO_UP_POINT:
             if event == Event.NAV_DONE_SUCCESS:
                 self.transition(RobotState.SEARCH_UP_BOARD)
