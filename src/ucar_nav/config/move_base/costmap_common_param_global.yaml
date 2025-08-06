@@ -31,7 +31,8 @@ inflation_layer:
   enabled: true
   cost_scaling_factor: 25.0
 # inflation_radius: 0.2
-  inflation_radius: 0.25
+  inflation_radius: 0.2
+  
 #0.15
  
 static_layer:

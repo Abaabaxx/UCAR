@@ -96,7 +96,7 @@ TebLocalPlannerROS:
   weight_kinematics_turning_radius: 200 # default 1 | 0~1000 机器人最小转向半径的权重，越大则越容易达到最小转向半径的情况
   weight_optimaltime: 2 #zf3 default 1 | 最优时间权重。must be > 0 如果大了，那么车会在直道上快速加速，并且路径规划的也会切内道，这个参数越小，整个过程的车速会越稳定
   weight_shortest_path: 0
-  weight_obstacle: 100 #zf20 default 100 避障在整个优化函数中的权重
+  weight_obstacle: 50 #zf20 default 100 避障在整个优化函数中的权重
   weight_inflation: 0.3  #zf0.2
   weight_dynamic_obstacle: 10 # default 10
   weight_dynamic_obstacle_inflation: 0.2

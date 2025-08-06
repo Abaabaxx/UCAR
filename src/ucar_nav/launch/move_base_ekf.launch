@@ -13,8 +13,8 @@
         <!-- 加载导航相关配置文件 -->
         <!-- 代价地图相关配置 -->
         <!-- 1. costmap通用参数: 配置机器人尺寸、传感器、膨胀层等公共参数 -->
-        <rosparam file="$(find ucar_nav)/config/move_base/costmap_common_params.yaml" command="load" ns="global_costmap" />
-        <rosparam file="$(find ucar_nav)/config/move_base/costmap_common_params.yaml" command="load" ns="local_costmap" />
+        <rosparam file="$(find ucar_nav)/config/move_base/costmap_common_params_global.yaml" command="load" ns="global_costmap" />
+        <rosparam file="$(find ucar_nav)/config/move_base/costmap_common_params_local.yaml" command="load" ns="local_costmap" />
 
         <!-- 2. 局部代价地图: 配置更新频率、地图大小、跟随机器人的行为等 -->
         <rosparam file="$(find ucar_nav)/config/move_base/local_costmap_params.yaml" command="load" />
