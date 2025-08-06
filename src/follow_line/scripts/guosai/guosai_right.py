@@ -8,7 +8,7 @@ from sensor_msgs.msg import Image, LaserScan
 from cv_bridge import CvBridge, CvBridgeError
 from std_srvs.srv import SetBool, SetBoolResponse
 from geometry_msgs.msg import Twist, Point
-
+from std_msgs.msg import String
 from nav_msgs.msg import Odometry
 
 from threading import Lock

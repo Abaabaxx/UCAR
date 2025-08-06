@@ -9,7 +9,7 @@ from cv_bridge import CvBridge, CvBridgeError
 from std_srvs.srv import SetBool, SetBoolResponse
 from geometry_msgs.msg import Twist, Point
 from nav_msgs.msg import Odometry
-
+from std_msgs.msg import String
 from threading import Lock
 import time
 import math
