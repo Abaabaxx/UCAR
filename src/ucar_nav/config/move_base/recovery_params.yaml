@@ -1,0 +1,42 @@
+# ===============================================================
+#             恢复行为的参数定义 (通用模式)
+# ===============================================================
+# 注意该恢复行为参数只有他的顺序是有用的，参数没有用，因为movebase会采用内部的默认参数来覆盖这里的参数，所以只可以自定义恢复行为的执行的动作的组合
+
+# --- “清除”行为的参数 ---
+# 所有类型为 clear_costmap_recovery 的行为都将使用这套参数
+clear_costmap_recovery:
+  reset_distance: 0.0   # 设为0.0，进行最彻底的清除
+  # layer_names: ["obstacle_layer"] # 通常保留默认即可，需要时再取消注释
+
+# --- “旋转”行为的参数 ---
+# 所有类型为 rotate_recovery 的行为都将使用这套参数
+rotate_recovery:
+  rotational_vel: 0.3          # 旋转速度 (rad/s), 比默认的1.0稍快
+  acc_lim_th: 2.0              # 旋转加速度
+  yaw_goal_tolerance: 0.15     # 目标角度容忍度 (rad), 放宽一点以节省时间
+  sim_granularity: 0.017       # 仿真检查的步长角度
+
+# ===============================================================
+#                       恢复行为执行顺序
+# ===============================================================
+recovery_behaviors:
+  # 这里的 'name' 字段是给人看的别名，方便看日志
+  # 顺序：清除 -> 旋转 -> 旋转 -> 清除 -> 旋转
+  - name: 'reset_recovery_1'
+    type: 'clear_costmap_recovery/ClearCostmapRecovery'
+
+  - name: 'rotate_recovery_1'
+    type: 'rotate_recovery/RotateRecovery'
+
+  - name: 'rotate_recovery_2'
+    type: 'rotate_recovery/RotateRecovery'
+
+  - name: 'reset_recovery_2'
+    type: 'clear_costmap_recovery/ClearCostmapRecovery'
+
+  - name: 'rotate_recovery_3'
+    type: 'rotate_recovery/RotateRecovery'
+
+  - name: 'rotate_recovery_4'
+    type: 'rotate_recovery/RotateRecovery'

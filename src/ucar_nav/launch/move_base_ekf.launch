@@ -28,6 +28,9 @@
 
         <!-- 2. 局部规划器(TEB) -->
         <rosparam file="$(find ucar_nav)/config/move_base_test/teb_test/4-28_teb_test0.yaml" command="load" />
+
+        <!--恢复行为机制相关配置-->
+        <rosparam file="$(find ucar_nav)/config/move_base/recovery_params.yaml" command="load" />
     </node>
 
 </launch>
