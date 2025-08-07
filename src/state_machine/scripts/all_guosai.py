@@ -205,7 +205,7 @@ class UnifiedStateMachine(object):
             'desserts': ['milk', 'cake', 'cola'],
             'vegetables': ['pepper', 'potato', 'tomato']
         }
-        self.yolo_confidence_threshold = 0.6 # YOLO识别的置信度阈值
+        self.yolo_confidence_threshold = 0.5 # YOLO识别的置信度阈值
         self.found_good_name = None   # 用于存储找到的货物名称
         
         # 新增：仿真任务相关变量
