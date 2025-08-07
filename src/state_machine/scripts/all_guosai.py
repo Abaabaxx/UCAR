@@ -33,8 +33,8 @@ import actionlib
 from std_msgs.msg import String
 from std_msgs.msg import Int32
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
-from geometry_msgs.msg import PoseStamped
-from std_srvs.srv import Trigger, TriggerResponse
+from geometry_msgs.msg import PoseStamped, Twist # 新增 Twist
+from std_srvs.srv import Trigger, TriggerResponse, Empty # 新增 Empty
 # 导入语音播报服务消息
 from xf_mic_asr_offline.srv import VoiceCmd, VoiceCmdRequest
 import subprocess
@@ -79,9 +79,11 @@ class Event(object):
     LIGHT_DETECTED_RED = 15
     LIGHT_DETECT_TIMEOUT = 16
     # --- 任务收尾阶段事件 ---
-    NODES_SHUTDOWN_COMPLETE = 17  # 替代原YOLO_SHUTDOWN_...
-    NODES_SHUTDOWN_TIMEOUT = 18   # 替代原YOLO_SHUTDOWN_...
+    NODES_SHUTDOWN_COMPLETE = 17  # 节点关闭成功
+    NODES_SHUTDOWN_TIMEOUT = 18   # 节点关闭超时
     LINE_FOLLOWING_DONE = 19      # 新增：巡线完成事件
+    SIMULATION_FAILURE = 20       # 新增：仿真任务失败事件
+    RECOVERY_DONE = 21            # 新增: 导航恢复完成
 
 # 统一状态类定义
 class RobotState(object):
@@ -121,6 +123,7 @@ class RobotState(object):
     TASK_COMPLETE = 30
     # --- 系统状态 ---
     ERROR = 99
+    NAVIGATION_RECOVERY = 100     # 新增: 导航恢复状态
 
 #********************************* 主状态机类 *********************************#
 
@@ -151,6 +154,13 @@ class UnifiedStateMachine(object):
         self.last_awake_angle = None
         self.current_state = RobotState.IDLE  # 开发者可修改此行进行测试
         self.navigation_active = False
+        self.state_before_recovery = None # 新增：用于存储恢复前的状态
+        self.recovery_timer = None # 新增：恢复定时器句柄
+        self.recovery_twist_pub_timer = None # 新增：用于在恢复期间持续发布速度指令的定时器
+
+        # 新增: 导航恢复相关配置参数
+        self.recovery_rotation_speed = 0.7 # 恢复时的旋转速度 (rad/s)
+        self.recovery_rotation_duration = 17.0 # 恢复时的旋转时间 (s)
         
         # 二维码相关变量
         self.qr_perception_timeout = 5.0 
@@ -269,6 +279,17 @@ class UnifiedStateMachine(object):
         # 服务定义
         self.reset_service = rospy.Service('reset_state_machine', Trigger, self.reset_callback)
         self.start_service = rospy.Service('start_state_machine', Trigger, self.start_callback)
+
+        # 新增: 用于导航恢复的发布者和服务
+        self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
+        rospy.loginfo("等待AMCL全局定位服务 /global_localization...")
+        try:
+            rospy.wait_for_service('/global_localization', timeout=5.0)
+            self.global_localization_service = rospy.ServiceProxy('/global_localization', Empty)
+            rospy.loginfo("AMCL全局定位服务连接成功")
+        except (rospy.ROSException, rospy.ServiceException) as e:
+            rospy.logwarn("AMCL全局定位服务不可用，导航恢复功能可能受限: %s", e)
+            self.global_localization_service = None
 
     def init_locations(self):
         self.locations = {
@@ -466,7 +487,7 @@ class UnifiedStateMachine(object):
                 self.handle_event(Event.SIMULATION_DONE)
             else:
                 rospy.logerr("仿真任务执行失败。")
-                self.handle_event(Event.NAV_DONE_FAILURE) # 复用导航失败事件
+                self.handle_event(Event.SIMULATION_FAILURE) # 修改：使用专属的仿真失败事件
             
         elif self.current_state == RobotState.SPEAK_ROOM:
             rospy.loginfo("16-状态[SPEAK_ROOM]: 准备播报仿真任务找到的房间...")
@@ -609,6 +630,10 @@ class UnifiedStateMachine(object):
             rospy.logerr("99-错误状态，停止所有活动")
             self.stop_all_activities()
 
+        elif self.current_state == RobotState.NAVIGATION_RECOVERY:
+            rospy.loginfo("100-执行导航恢复：调用全局定位并原地旋转")
+            self._execute_navigation_recovery()
+
     # 事件处理函数，根据当前状态和接受到的事件进行状态转换
     def handle_event(self, event):
         event_name = self.event_name(event)
@@ -623,20 +648,26 @@ class UnifiedStateMachine(object):
             if event == Event.NAV_DONE_SUCCESS:
                 self.transition(RobotState.ROTATE_TO_QR2)
             elif event == Event.NAV_DONE_FAILURE:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("导航失败，进入恢复状态...")
+                self.state_before_recovery = self.current_state
+                self.transition(RobotState.NAVIGATION_RECOVERY)
                 
         elif self.current_state == RobotState.ROTATE_TO_QR2:
             if event == Event.NAV_DONE_SUCCESS:
                 self.transition(RobotState.NAVIGATE_TO_QR_AREA)
             elif event == Event.NAV_DONE_FAILURE:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("导航失败，进入恢复状态...")
+                self.state_before_recovery = self.current_state
+                self.transition(RobotState.NAVIGATION_RECOVERY)
                 
         elif self.current_state == RobotState.NAVIGATE_TO_QR_AREA:
             if event == Event.NAV_DONE_SUCCESS:
                 rospy.loginfo("导航至二维码区域完成")
                 self.transition(RobotState.WAIT_FOR_QR_RESULT)
             elif event == Event.NAV_DONE_FAILURE:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("导航失败，进入恢复状态...")
+                self.state_before_recovery = self.current_state
+                self.transition(RobotState.NAVIGATION_RECOVERY)
                 
         elif self.current_state == RobotState.WAIT_FOR_QR_RESULT:
             if event == Event.QR_RESULT_VALID:
@@ -671,14 +702,18 @@ class UnifiedStateMachine(object):
                 # 关键桥梁：转换到后半段起始状态
                 self.transition(RobotState.NAVIGATE_TO_UP_POINT)
             elif event == Event.NAV_DONE_FAILURE:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("导航失败，进入恢复状态...")
+                self.state_before_recovery = self.current_state
+                self.transition(RobotState.NAVIGATION_RECOVERY)
         
         # --- 后半段事件处理 ---
         elif self.current_state == RobotState.NAVIGATE_TO_UP_POINT:
             if event == Event.NAV_DONE_SUCCESS:
                 self.transition(RobotState.SEARCH_UP_BOARD)
             elif event == Event.NAV_DONE_FAILURE:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("导航失败，进入恢复状态...")
+                self.state_before_recovery = self.current_state
+                self.transition(RobotState.NAVIGATION_RECOVERY)
                 
         elif self.current_state == RobotState.SEARCH_UP_BOARD:
             if event == Event.SEARCH_DONE_SUCCESS:
@@ -690,7 +725,9 @@ class UnifiedStateMachine(object):
             if event == Event.NAV_DONE_SUCCESS:
                 self.transition(RobotState.SEARCH_DOWN_BOARD)
             elif event == Event.NAV_DONE_FAILURE:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("导航失败，进入恢复状态...")
+                self.state_before_recovery = self.current_state
+                self.transition(RobotState.NAVIGATION_RECOVERY)
                 
         elif self.current_state == RobotState.SEARCH_DOWN_BOARD:
             if event == Event.SEARCH_DONE_SUCCESS:
@@ -741,11 +778,15 @@ class UnifiedStateMachine(object):
                 rospy.loginfo("成功到达仿真区，准备执行仿真任务。")
                 self.transition(RobotState.DO_SIMULATION_TASKS)
             elif event == Event.NAV_DONE_FAILURE:
-                rospy.logerr("导航至仿真区失败。")
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("导航失败，进入恢复状态...")
+                self.state_before_recovery = self.current_state
+                self.transition(RobotState.NAVIGATION_RECOVERY)
                 
-        elif self.current_state == RobotState.DO_SIMULATION_TASKS and event == Event.SIMULATION_DONE:
-            self.transition(RobotState.SPEAK_ROOM)
+        elif self.current_state == RobotState.DO_SIMULATION_TASKS:
+            if event == Event.SIMULATION_DONE:
+                self.transition(RobotState.SPEAK_ROOM)
+            elif event == Event.SIMULATION_FAILURE:
+                self.transition(RobotState.ERROR)
             
         elif self.current_state == RobotState.SPEAK_ROOM and event == Event.SPEAK_DONE:
             self.transition(RobotState.NAV_TO_TRAFFIC)
@@ -757,7 +798,9 @@ class UnifiedStateMachine(object):
             if event == Event.NAV_DONE_SUCCESS:
                 self.transition(RobotState.DETECTING_LANE1_LIGHT)
             elif event == Event.NAV_DONE_FAILURE:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("导航失败，进入恢复状态...")
+                self.state_before_recovery = self.current_state
+                self.transition(RobotState.NAVIGATION_RECOVERY)
 
         elif self.current_state == RobotState.DETECTING_LANE1_LIGHT:
             if event == Event.LIGHT_DETECTED_GREEN:
@@ -778,13 +821,17 @@ class UnifiedStateMachine(object):
             if event == Event.NAV_DONE_SUCCESS:
                 self.transition(RobotState.SHUTDOWN_FINAL_NODES) # 修改：进入关闭最终节点状态
             elif event == Event.NAV_DONE_FAILURE:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("导航失败，进入恢复状态...")
+                self.state_before_recovery = self.current_state
+                self.transition(RobotState.NAVIGATION_RECOVERY)
                 
         elif self.current_state == RobotState.NAV_TO_LANE2_OBSERVE_POINT:
             if event == Event.NAV_DONE_SUCCESS:
                 self.transition(RobotState.DETECTING_LANE2_LIGHT)
             elif event == Event.NAV_DONE_FAILURE:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("导航失败，进入恢复状态...")
+                self.state_before_recovery = self.current_state
+                self.transition(RobotState.NAVIGATION_RECOVERY)
                 
         elif self.current_state == RobotState.DETECTING_LANE2_LIGHT:
             if event == Event.LIGHT_DETECTED_GREEN:
@@ -803,7 +850,9 @@ class UnifiedStateMachine(object):
             if event == Event.NAV_DONE_SUCCESS:
                 self.transition(RobotState.SHUTDOWN_FINAL_NODES) # 修改：进入关闭最终节点状态
             elif event == Event.NAV_DONE_FAILURE:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("导航失败，进入恢复状态...")
+                self.state_before_recovery = self.current_state
+                self.transition(RobotState.NAVIGATION_RECOVERY)
 
         # --- 以下为新增和重构的收尾阶段事件处理 ---
         
@@ -812,6 +861,11 @@ class UnifiedStateMachine(object):
                 self.transition(RobotState.RELAUNCH_CAMERA_FOR_LINE_FOLLOWING)
             elif event == Event.NODES_SHUTDOWN_TIMEOUT:
                 self.transition(RobotState.ERROR)
+
+        elif self.current_state == RobotState.NAVIGATION_RECOVERY:
+            if event == Event.RECOVERY_DONE:
+                rospy.loginfo("导航恢复完成，返回到状态: %s", self.state_name(self.state_before_recovery))
+                self.transition(self.state_before_recovery)
 
         elif self.current_state == RobotState.LINE_FOLLOWING:
             if event == Event.LINE_FOLLOWING_DONE:
@@ -900,6 +954,61 @@ class UnifiedStateMachine(object):
     def delayed_nav_success(self):
         rospy.loginfo("0.5秒定时结束，执行状态转换...")
         self.handle_event(Event.NAV_DONE_SUCCESS)
+
+    #*********************** 新增：导航恢复功能 ***********************#
+    def _execute_navigation_recovery(self):
+        # 1. 调用全局定位服务
+        if self.global_localization_service:
+            try:
+                rospy.loginfo("正在调用 /global_localization 服务...")
+                self.global_localization_service()
+                rospy.loginfo("全局定位服务调用成功。")
+            except rospy.ServiceException as e:
+                rospy.logerr("调用 /global_localization 服务失败: %s", e)
+        else:
+            rospy.logwarn("/global_localization 服务不可用，跳过重定位。")
+
+        # 2. 发布旋转指令 (修改为循环发布)
+        rospy.loginfo("开始原地旋转 %.1f 秒，速度 %.2f rad/s", 
+                    self.recovery_rotation_duration, self.recovery_rotation_speed)
+        
+        # 创建一个定时器，以10Hz的频率持续发布旋转指令
+        self.recovery_twist_pub_timer = rospy.Timer(
+            rospy.Duration(0.1), # 10 Hz
+            self._publish_recovery_twist
+        )
+
+        # 3. 启动定时器，在指定时间后停止旋转
+        self.recovery_timer = rospy.Timer(
+            rospy.Duration(self.recovery_rotation_duration),
+            self._recovery_done_callback,
+            oneshot=True
+        )
+
+
+    def _publish_recovery_twist(self, event):
+        """在恢复期间持续发布旋转指令的回调函数"""
+        twist_msg = Twist()
+        twist_msg.angular.z = self.recovery_rotation_speed
+        self.cmd_vel_pub.publish(twist_msg)
+
+    def _recovery_done_callback(self, event):
+        rospy.loginfo("旋转结束，停止机器人。")
+        # 1. 停止旋转
+        # 停止持续发布速度的定时器
+        if self.recovery_twist_pub_timer:
+            self.recovery_twist_pub_timer.shutdown()
+            self.recovery_twist_pub_timer = None
+            
+        self.cmd_vel_pub.publish(Twist()) # 发布空Twist消息以确保停止
+        
+        # 2. 清理主恢复定时器句柄
+        if self.recovery_timer:
+            self.recovery_timer.shutdown()
+            self.recovery_timer = None
+
+        # 3. 触发恢复完成事件
+        self.handle_event(Event.RECOVERY_DONE)
 
     #*********************** 后半段特有功能函数 ***********************#
     
@@ -1654,6 +1763,14 @@ class UnifiedStateMachine(object):
         if self.speak_timer:
             self.speak_timer.shutdown()
             self.speak_timer = None
+        
+        if self.recovery_timer: # 新增
+            self.recovery_timer.shutdown()
+            self.recovery_timer = None
+        
+        if self.recovery_twist_pub_timer: # 新增
+            self.recovery_twist_pub_timer.shutdown()
+            self.recovery_twist_pub_timer = None
         
         # 停止红绿灯检测相关活动
         self.stop_light_detection_activities()

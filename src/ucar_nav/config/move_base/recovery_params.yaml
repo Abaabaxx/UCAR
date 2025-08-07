@@ -32,11 +32,4 @@ recovery_behaviors:
   - name: 'rotate_recovery_2'
     type: 'rotate_recovery/RotateRecovery'
 
-  - name: 'reset_recovery_2'
-    type: 'clear_costmap_recovery/ClearCostmapRecovery'
 
-  - name: 'rotate_recovery_3'
-    type: 'rotate_recovery/RotateRecovery'
-
-  - name: 'rotate_recovery_4'
-    type: 'rotate_recovery/RotateRecovery'
