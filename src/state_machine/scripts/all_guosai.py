@@ -205,7 +205,14 @@ class UnifiedStateMachine(object):
             'desserts': ['milk', 'cake', 'cola'],
             'vegetables': ['pepper', 'potato', 'tomato']
         }
-        self.yolo_confidence_threshold = 0.5 # YOLO识别的置信度阈值
+        # 新增：动态置信度阈值矩阵
+        # 格式: self.confidence_matrix[全局重试次数][巡检重试次数]
+        self.confidence_matrix = [
+            [0.70, 0.60, 0.50],  # 全局第1轮的3次巡检
+            [0.60, 0.50, 0.40],  # 全局第2轮的3次巡检
+            [0.30, 0.25, 0.20]   # 全局第3轮的3次巡检
+        ]
+        self.yolo_confidence_threshold = self.confidence_matrix[0][0] # 初始值
         self.found_good_name = None   # 用于存储找到的货物名称
 
         # 新增：双重重试机制计数器
@@ -1072,6 +1079,14 @@ class UnifiedStateMachine(object):
     # 执行巡检序列
     def execute_patrol_sequence(self):
         """执行多点巡检导航逻辑，寻找目标货物"""
+        # --- 动态置信度更新 ---
+        current_global_try = self.global_search_retry_count
+        current_patrol_try = self.patrol_retry_count
+        self.yolo_confidence_threshold = self.confidence_matrix[current_global_try][current_patrol_try]
+        rospy.loginfo("--- 开始巡检序列 (全局第%d轮 / 巡检第%d次) ---", 
+                    current_global_try + 1, current_patrol_try + 1)
+        rospy.loginfo("--- 本次使用YOLO置信度阈值: %.2f ---", self.yolo_confidence_threshold)
+        
         rospy.loginfo("开始执行多点巡检导航，寻找 %s 类别的货物...", self.task_type)
         
         # 获取当前任务需要检测的货物列表
