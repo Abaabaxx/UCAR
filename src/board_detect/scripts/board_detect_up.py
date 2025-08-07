@@ -53,7 +53,7 @@ class ClusterVisualizer:
         self.polygon = Polygon([(-0.2, 3.1), (2.7, 3.1), (2.7, 5.2), (-0.2, 5.2)])
         
         # 目标位姿参数
-        self.target_distance = 0.50  # 前方目标距离（米）
+        self.target_distance = 0.60  # 前方目标距离（米）
         
         # 新增：定义精确的过滤模板和阈值
         self.filter_target_x = 2.0
