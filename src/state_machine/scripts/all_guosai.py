@@ -207,6 +207,12 @@ class UnifiedStateMachine(object):
         }
         self.yolo_confidence_threshold = 0.5 # YOLO识别的置信度阈值
         self.found_good_name = None   # 用于存储找到的货物名称
+
+        # 新增：双重重试机制计数器
+        self.patrol_retry_count = 0
+        self.max_patrol_retries = 2  # 巡检“小循环”重试次数 (共1+2=3次)
+        self.global_search_retry_count = 0
+        self.max_global_search_retries = 2 # 全局“大循环”重试次数 (共1+2=3次)
         
         # 新增：仿真任务相关变量
         self.PC_IP = '192.168.222.206'  # 请确保这是您电脑的正确IP地址
@@ -687,9 +693,35 @@ class UnifiedStateMachine(object):
                 
         elif self.current_state == RobotState.PICK_UP_GOODS:
             if event == Event.GOODS_FOUND:
+                # 找到了货物，重置所有重试计数器，然后继续
+                rospy.loginfo("成功找到货物！重置所有重试计数器。")
+                self.patrol_retry_count = 0
+                self.global_search_retry_count = 0
                 self.transition(RobotState.SPEAK_GOODS)
+                
             elif event == Event.PATROL_SEQUENCE_COMPLETED:
-                self.transition(RobotState.ERROR)
+                # 巡检“小循环”重试
+                if self.patrol_retry_count < self.max_patrol_retries:
+                    self.patrol_retry_count += 1
+                    rospy.logwarn("巡检未找到货物。将在3秒后进行第 %d/%d 次巡检重试...",
+                                self.patrol_retry_count, self.max_patrol_retries)
+                    rospy.Timer(rospy.Duration(3.0),
+                              lambda e: self.transition(RobotState.PICK_UP_GOODS),
+                              oneshot=True)
+                else:
+                    # “小循环”次数用尽，尝试“大循环”重试
+                    self.patrol_retry_count = 0  # 重置小循环计数器
+                    if self.global_search_retry_count < self.max_global_search_retries:
+                        self.global_search_retry_count += 1
+                        rospy.logerr("所有巡检重试均失败。将进行第 %d/%d 次全局搜索...",
+                                     self.global_search_retry_count, self.max_global_search_retries)
+                        self.transition(RobotState.NAVIGATE_TO_UP_POINT)
+                    else:
+                        # 所有重试机会都已用尽
+                        rospy.logerr("所有巡检和全局搜索尝试均失败！放弃寻找货物，继续执行后续任务。")
+                        self.patrol_retry_count = 0
+                        self.global_search_retry_count = 0
+                        self.transition(RobotState.NAV_TO_SIMULATION)
                 
         elif self.current_state == RobotState.SPEAK_GOODS:
             if event == Event.SPEAK_DONE:
