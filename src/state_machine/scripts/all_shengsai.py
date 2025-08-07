@@ -278,8 +278,8 @@ class UnifiedStateMachine(object):
             'qr_area': self.create_pose(1.25, 0.75, -1.0, 0.0),
             'pick_prep_area': self.create_pose(0.5, 2.0, 0.7071, 0.7071),  # 桥梁位置
             # 后半段位置
-            'up_point': self.create_pose(1.25, 3.0, 0.7071, 0.7071),
-            'down_point': self.create_pose(1.25, 4.10, -0.7071, 0.7071),
+            'up_point': self.create_pose(1.25, 3.75, 0.7071, 0.7071),
+            'down_point': self.create_pose(1.25, 3.75, -0.7071, 0.7071),
             'simulation_area': self.create_pose(1.25, 3.75, 0.7071, 0.7071),
             'lane1_observe_point': self.create_pose(3.25, 4.25, 0.7071, 0.7071),
             'lane2_observe_point': self.create_pose(4.25, 4.25, 0.7071, 0.7071),
