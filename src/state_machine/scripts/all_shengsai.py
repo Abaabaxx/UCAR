@@ -251,6 +251,7 @@ class UnifiedStateMachine(object):
         self.light_detection_timeout = 3.0  # 红绿灯检测超时时间(秒)
         self.light_detection_timer = None
         self.light_detection_subscriber = None
+        self.clear_costmaps_service = None
 
     def init_ros_comm(self):
         # 状态发布和任务发布
@@ -290,6 +291,15 @@ class UnifiedStateMachine(object):
         except (rospy.ROSException, rospy.ServiceException) as e:
             rospy.logwarn("AMCL全局定位服务不可用，导航恢复功能可能受限: %s", e)
             self.global_localization_service = None
+
+        rospy.loginfo("等待move_base代价地图清理服务 /move_base/clear_costmaps...")
+        try:
+            rospy.wait_for_service('/move_base/clear_costmaps', timeout=5.0)
+            self.clear_costmaps_service = rospy.ServiceProxy('/move_base/clear_costmaps', Empty)
+            rospy.loginfo("move_base代价地图清理服务连接成功")
+        except (rospy.ROSException, rospy.ServiceException) as e:
+            rospy.logwarn("move_base代价地图清理服务不可用: %s", e)
+            self.clear_costmaps_service = None
 
     def init_locations(self):
         self.locations = {
@@ -1000,6 +1010,17 @@ class UnifiedStateMachine(object):
             self.recovery_twist_pub_timer = None
             
         self.cmd_vel_pub.publish(Twist()) # 发布空Twist消息以确保停止
+
+        # 调用服务清理代价地图
+        if self.clear_costmaps_service:
+            try:
+                rospy.loginfo("正在调用 /move_base/clear_costmaps 服务...")
+                self.clear_costmaps_service()
+                rospy.loginfo("代价地图清理成功。")
+            except rospy.ServiceException as e:
+                rospy.logerr("调用 /move_base/clear_costmaps 服务失败: %s", e)
+        else:
+            rospy.logwarn("/move_base/clear_costmaps 服务不可用，跳过清理。")
         
         # 2. 清理主恢复定时器句柄
         if self.recovery_timer:
