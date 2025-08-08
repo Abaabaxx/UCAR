@@ -243,6 +243,7 @@ class UnifiedStateMachine(object):
         
         # 新增：仿真任务相关变量
         self.PC_IP = '192.168.222.206'  # 请确保这是您电脑的正确IP地址
+        self.simulation_timeout_duration = 210.0 # 3分30秒
         self.simulation_found_item = None
         self.simulation_room_location = None
         
@@ -818,7 +819,11 @@ class UnifiedStateMachine(object):
             if event == Event.SIMULATION_DONE:
                 self.transition(RobotState.SPEAK_ROOM)
             elif event == Event.SIMULATION_FAILURE:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("仿真任务失败或超时，为了完赛，直接跳至红绿灯环节。")
+                # 即使失败，也为后续播报设置默认值
+                self.simulation_found_item = "not_found"
+                self.simulation_room_location = "unknown_room"
+                self.transition(RobotState.NAV_TO_TRAFFIC)
             
         elif self.current_state == RobotState.SPEAK_ROOM and event == Event.SPEAK_DONE:
             self.transition(RobotState.NAV_TO_TRAFFIC)
@@ -1739,8 +1744,8 @@ class UnifiedStateMachine(object):
             
             request = roslibpy.ServiceRequest({'item_to_find': chosen_item})
             
-            rospy.loginfo("正在发送请求并等待仿真任务完成...")
-            response = find_item_service.call(request)
+            rospy.loginfo("正在发送请求并等待仿真任务完成 (超时: %.1f秒)...", self.simulation_timeout_duration)
+            response = find_item_service.call(request, timeout=self.simulation_timeout_duration)
             
             self.simulation_room_location = response.get('room_location', 'unknown_room')
             self.simulation_found_item = response.get('found_item_name', 'not_found')
@@ -1750,7 +1755,7 @@ class UnifiedStateMachine(object):
             return True
 
         except Exception as e:
-            rospy.logerr("调用仿真服务时发生错误: %s", e)
+            rospy.logerr("调用仿真服务时发生错误 (可能已超时): %s", e)
             return False
         finally:
             if client.is_connected:
