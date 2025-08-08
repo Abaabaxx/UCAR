@@ -1623,7 +1623,7 @@ class LineFollowerNode:
         # 全局丢线处理：如果丢线，则对于所有需要巡线的状态，都执行原地旋转搜索
         if not is_line_found:
             # 只有在需要巡线的状态下才旋转搜索
-            if self.current_state in [FOLLOW_RIGHT, FOLLOW_RIGHT_WITH_AVOIDANCE, FOLLOW_TO_FINISH, ALIGN_WITH_ENTRANCE_BOARD]:
+            if self.current_state in [FOLLOW_RIGHT, FOLLOW_RIGHT_WITH_AVOIDANCE, FOLLOW_TO_FINISH]:
                 rospy.loginfo_throttle(1, "状态: %s | 丢线，开始原地旋转搜索...", STATE_NAMES[self.current_state])
                 twist_msg.linear.x = 0.0
                 twist_msg.angular.z = -self.alignment_rotation_speed_rad  # 负号表示向右旋转
