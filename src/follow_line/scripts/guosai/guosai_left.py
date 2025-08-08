@@ -118,6 +118,7 @@ STOP_ZONE_ROI_HEIGHT_PX = 3        # 从图像底部向上计算的窗口高度
 STOP_ZONE_ROI_WIDTH_PX = 30       # 窗口宽度
 STOP_ZONE_WHITE_PIXEL_THRESH = 0.60  # 窗口中白色像素的百分比阈值
 STOP_ZONE_CONSECUTIVE_FRAMES = 3     # 连续满足条件的帧数
+FOLLOW_TO_FINISH_TIMEOUT_S = 40.0 # 最终冲刺阶段的超时时间 (秒)
 
 # 定义沿墙走的搜索模式（Follow The Wall）
 # 逆时针搜索，用于沿着左侧赛道内边界行走
@@ -363,6 +364,7 @@ class LineFollowerNode:
         # 初始化停车区域检测相关的状态变量
         self.is_stop_zone_detected = False   # 标记单帧是否检测到停车区
         self.consecutive_stop_frames = 0     # 连续检测到停车区的帧数
+        self.follow_to_finish_start_time = None # 最终冲刺状态的起始时间
         
         # 初始化特殊区域检测相关的状态变量
         self.consecutive_special_frames = 0
@@ -1191,6 +1193,7 @@ class LineFollowerNode:
                     rospy.loginfo("向左平移完成。避障机动结束。")
                     # 机动完成，进入最终冲刺巡线状态
                     self.current_state = FOLLOW_TO_FINISH
+                    self.follow_to_finish_start_time = time.time()
             
             self.cmd_vel_pub.publish(twist_msg)
             
@@ -1548,6 +1551,16 @@ class LineFollowerNode:
                     twist_msg.angular.z = np.sign(obstacle_board_angle_error_deg) * self.alignment_rotation_speed_rad
                 
         elif self.current_state == FOLLOW_TO_FINISH:
+            # 优先检查超时
+            if self.follow_to_finish_start_time is not None:
+                elapsed_time = time.time() - self.follow_to_finish_start_time
+                if elapsed_time > FOLLOW_TO_FINISH_TIMEOUT_S:
+                    rospy.logwarn("状态: %s | 超过 %.1f 秒未完成，强制进入最终状态！", 
+                                STATE_NAMES[self.current_state], FOLLOW_TO_FINISH_TIMEOUT_S)
+                    self.stop()
+                    self.current_state = FINAL_STOP
+                    return # 立即退出，下一轮循环将处理FINAL_STOP
+
             # 读取停车区检测结果
             if is_stop_zone_detected:
                 self.consecutive_stop_frames += 1
