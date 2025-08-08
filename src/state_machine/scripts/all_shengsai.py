@@ -84,6 +84,8 @@ class Event(object):
     LINE_FOLLOWING_DONE = 19      # 新增：巡线完成事件
     SIMULATION_FAILURE = 20       # 新增：仿真任务失败事件
     RECOVERY_DONE = 21            # 新增: 导航恢复完成
+    ALIGN_BOARD_SUCCESS = 22      # 新增：对板成功事件
+    ALIGN_BOARD_FAILURE = 23      # 新增：对板失败/超时事件
 
 # 统一状态类定义
 class RobotState(object):
@@ -102,25 +104,26 @@ class RobotState(object):
     NAVIGATE_TO_DOWN_POINT = 10
     SEARCH_DOWN_BOARD = 11
     PICK_UP_GOODS = 12
-    SPEAK_GOODS = 13
-    NAV_TO_SIMULATION = 14
-    DO_SIMULATION_TASKS = 15
-    SPEAK_ROOM = 16
-    NAV_TO_TRAFFIC = 17
-    NAV_TO_LANE1_OBSERVE_POINT = 18
-    DETECTING_LANE1_LIGHT = 19
-    SPEAK_LANE1_CLEAR = 20
-    NAV_TO_LANE1_WAITING_POINT = 21
-    NAV_TO_LANE2_OBSERVE_POINT = 22
-    DETECTING_LANE2_LIGHT = 23
-    SPEAK_LANE2_CLEAR = 24
-    NAV_TO_LANE2_WAITING_POINT = 25
+    ALIGN_TO_BOARD = 13               # 新增：对板状态
+    SPEAK_GOODS = 14
+    NAV_TO_SIMULATION = 15
+    DO_SIMULATION_TASKS = 16
+    SPEAK_ROOM = 17
+    NAV_TO_TRAFFIC = 18
+    NAV_TO_LANE1_OBSERVE_POINT = 19
+    DETECTING_LANE1_LIGHT = 20
+    SPEAK_LANE1_CLEAR = 21
+    NAV_TO_LANE1_WAITING_POINT = 22
+    NAV_TO_LANE2_OBSERVE_POINT = 23
+    DETECTING_LANE2_LIGHT = 24
+    SPEAK_LANE2_CLEAR = 25
+    NAV_TO_LANE2_WAITING_POINT = 26
     # --- 任务收尾阶段（新） ---
-    SHUTDOWN_FINAL_NODES = 26         # 替代 SHUTDOWN_YOLO_NODE
-    RELAUNCH_CAMERA_FOR_LINE_FOLLOWING = 27
-    LINE_FOLLOWING = 28
-    SPEAK_FINAL = 29
-    TASK_COMPLETE = 30
+    SHUTDOWN_FINAL_NODES = 27         # 替代 SHUTDOWN_YOLO_NODE
+    RELAUNCH_CAMERA_FOR_LINE_FOLLOWING = 28
+    LINE_FOLLOWING = 29
+    SPEAK_FINAL = 30
+    TASK_COMPLETE = 31
     # --- 系统状态 ---
     ERROR = 99
     NAVIGATION_RECOVERY = 100     # 新增: 导航恢复状态
@@ -194,6 +197,13 @@ class UnifiedStateMachine(object):
         self.board_detect_process = None
         self.search_monitor_timer = None
         self.search_timeout_timer = None
+
+        # 新增：对板功能相关变量
+        self.align_board_script_path = "/home/ucar/lby_ws/src/board_detect/scripts/duiban.py"
+        self.align_board_timeout_duration = 15.0 # 对板超时时间(秒)
+        self.align_board_process = None
+        self.align_board_monitor_timer = None
+        self.align_board_timeout_timer = None
         
         # 新增：巡线任务相关变量
         self.camera_process = None
@@ -473,11 +483,15 @@ class UnifiedStateMachine(object):
         elif self.current_state == RobotState.PICK_UP_GOODS:
             rospy.loginfo("12-开始执行多点巡检...")
             self.execute_patrol_sequence()
+
+        elif self.current_state == RobotState.ALIGN_TO_BOARD:
+            rospy.loginfo("13-开始执行对板...")
+            self.start_align_board_process()
             
         elif self.current_state == RobotState.SPEAK_GOODS:
             if self.found_good_name:
                 self.current_voice_cmd = "get_" + self.found_good_name
-                rospy.loginfo("13-状态[SPEAK_GOODS]: 准备播报找到的货物: %s", self.current_voice_cmd)
+                rospy.loginfo("14-状态[SPEAK_GOODS]: 准备播报找到的货物: %s", self.current_voice_cmd)
                 self.voice_service_called = False
                 self.call_voice_service()
             else:
@@ -485,12 +499,12 @@ class UnifiedStateMachine(object):
                 self.handle_event(Event.SPEAK_TIMEOUT)
                 
         elif self.current_state == RobotState.NAV_TO_SIMULATION:
-            rospy.loginfo("14-开始导航至最终目标点：仿真区...")
+            rospy.loginfo("15-开始导航至最终目标点：仿真区...")
             self.send_nav_goal('simulation_area')
             self.navigation_active = True
             
         elif self.current_state == RobotState.DO_SIMULATION_TASKS:
-            rospy.loginfo("15-开始执行仿真任务，调用电脑端服务...")
+            rospy.loginfo("16-开始执行仿真任务，调用电脑端服务...")
             # 调用仿真服务并根据结果触发事件
             success = self._call_simulation_service()
             if success:
@@ -500,7 +514,7 @@ class UnifiedStateMachine(object):
                 self.handle_event(Event.SIMULATION_FAILURE) # 修改：使用专属的仿真失败事件
             
         elif self.current_state == RobotState.SPEAK_ROOM:
-            rospy.loginfo("16-状态[SPEAK_ROOM]: 准备播报仿真任务找到的房间...")
+            rospy.loginfo("17-状态[SPEAK_ROOM]: 准备播报仿真任务找到的房间...")
             if self.simulation_room_location and self.simulation_room_location != 'unknown_room':
                 self.current_voice_cmd = self.simulation_room_location
                 self.voice_service_called = False
@@ -510,51 +524,51 @@ class UnifiedStateMachine(object):
                 rospy.Timer(rospy.Duration(0.1), lambda e: self.handle_event(Event.SPEAK_DONE), oneshot=True)
 
         elif self.current_state == RobotState.NAV_TO_TRAFFIC:
-            rospy.loginfo("17-进入红绿灯区域状态，准备导航至第一车道观察点...")
+            rospy.loginfo("18-进入红绿灯区域状态，准备导航至第一车道观察点...")
             rospy.Timer(rospy.Duration(0.5), self._traffic_timer_callback, oneshot=True)
             
         elif self.current_state == RobotState.NAV_TO_LANE1_OBSERVE_POINT:
-            rospy.loginfo("18-开始导航至第一车道观察点...")
+            rospy.loginfo("19-开始导航至第一车道观察点...")
             self.send_nav_goal('lane1_observe_point')
             self.navigation_active = True
 
         elif self.current_state == RobotState.DETECTING_LANE1_LIGHT:
-            rospy.loginfo("19-开始检测第一车道红绿灯...")
+            rospy.loginfo("20-开始检测第一车道红绿灯...")
             self.start_light_detection()
             
         elif self.current_state == RobotState.SPEAK_LANE1_CLEAR:
-            rospy.loginfo("20-第一车道绿灯，准备播报通行信息...")
+            rospy.loginfo("21-第一车道绿灯，准备播报通行信息...")
             self.current_voice_cmd = "way_1"
             self.voice_service_called = False
             self.call_voice_service()
             
         elif self.current_state == RobotState.NAV_TO_LANE1_WAITING_POINT:
-            rospy.loginfo("21-开始导航至第一车道等待点...")
+            rospy.loginfo("22-开始导航至第一车道等待点...")
             self.send_nav_goal('lane1_waiting_point')
             self.navigation_active = True
             
         elif self.current_state == RobotState.NAV_TO_LANE2_OBSERVE_POINT:
-            rospy.loginfo("22-开始导航至第二车道观察点...")
+            rospy.loginfo("23-开始导航至第二车道观察点...")
             self.send_nav_goal('lane2_observe_point')
             self.navigation_active = True
             
         elif self.current_state == RobotState.DETECTING_LANE2_LIGHT:
-            rospy.loginfo("23-开始检测第二车道红绿灯...")
+            rospy.loginfo("24-开始检测第二车道红绿灯...")
             self.start_light_detection()
             
         elif self.current_state == RobotState.SPEAK_LANE2_CLEAR:
-            rospy.loginfo("24-第二车道绿灯，准备播报通行信息...")
+            rospy.loginfo("25-第二车道绿灯，准备播报通行信息...")
             self.current_voice_cmd = "way_2"
             self.voice_service_called = False
             self.call_voice_service()
             
         elif self.current_state == RobotState.NAV_TO_LANE2_WAITING_POINT:
-            rospy.loginfo("25-开始导航至第二车道等待点...")
+            rospy.loginfo("26-开始导航至第二车道等待点...")
             self.send_nav_goal('lane2_waiting_point')
             self.navigation_active = True
             
         elif self.current_state == RobotState.SHUTDOWN_FINAL_NODES:
-            rospy.loginfo("26-正在尝试关闭最终节点: %s, /darknet_ros, /move_base, /amcl...", self.camera_node_name)
+            rospy.loginfo("27-正在尝试关闭最终节点: %s, /darknet_ros, /move_base, /amcl...", self.camera_node_name)
             subprocess.call(['rosnode', 'kill', self.camera_node_name])
             subprocess.call(['rosnode', 'kill', '/darknet_ros'])
             subprocess.call(['rosnode', 'kill', '/move_base'])
@@ -572,7 +586,7 @@ class UnifiedStateMachine(object):
             )
 
         elif self.current_state == RobotState.RELAUNCH_CAMERA_FOR_LINE_FOLLOWING:
-            rospy.loginfo("27-所有节点已关闭。等待2秒后为巡线任务重启摄像头...")
+            rospy.loginfo("28-所有节点已关闭。等待2秒后为巡线任务重启摄像头...")
             rospy.sleep(2.0)
             try:
                 rospy.loginfo("正在执行命令: %s", ' '.join(self.camera_line_following_launch_command))
@@ -585,7 +599,7 @@ class UnifiedStateMachine(object):
                 self.transition(RobotState.ERROR)
 
         elif self.current_state == RobotState.LINE_FOLLOWING:
-            rospy.loginfo("28-进入最终巡线状态，根据选择的车道启动相应脚本...")
+            rospy.loginfo("29-进入最终巡线状态，根据选择的车道启动相应脚本...")
             script_to_run = None
             if self.final_lane_choice == 'lane1':
                 rospy.loginfo("选择第一车道，启动右侧巡线脚本: %s", self.line_following_script_right)
@@ -620,7 +634,7 @@ class UnifiedStateMachine(object):
                 self.transition(RobotState.ERROR)
 
         elif self.current_state == RobotState.SPEAK_FINAL:
-            rospy.loginfo("29-状态[SPEAK_FINAL]: 准备进行最终任务播报...")
+            rospy.loginfo("30-状态[SPEAK_FINAL]: 准备进行最终任务播报...")
             item1 = self.found_good_name
             item2 = self.simulation_found_item
             if item1 and item2:
@@ -633,7 +647,7 @@ class UnifiedStateMachine(object):
                 rospy.Timer(rospy.Duration(0.1), lambda e: self.transition(RobotState.TASK_COMPLETE), oneshot=True)
 
         elif self.current_state == RobotState.TASK_COMPLETE:
-            rospy.loginfo("30-全部任务完成！机器人将停止所有活动。")
+            rospy.loginfo("31-全部任务完成！机器人将停止所有活动。")
             self.stop_all_activities()
             
         elif self.current_state == RobotState.ERROR:
@@ -751,7 +765,7 @@ class UnifiedStateMachine(object):
                 rospy.loginfo("成功找到货物！重置所有重试计数器。")
                 self.patrol_retry_count = 0
                 self.global_search_retry_count = 0
-                self.transition(RobotState.SPEAK_GOODS)
+                self.transition(RobotState.ALIGN_TO_BOARD)
                 
             elif event == Event.PATROL_SEQUENCE_COMPLETED:
                 # 巡检“小循环”重试
@@ -776,6 +790,14 @@ class UnifiedStateMachine(object):
                         self.patrol_retry_count = 0
                         self.global_search_retry_count = 0
                         self.transition(RobotState.NAV_TO_SIMULATION)
+        
+        elif self.current_state == RobotState.ALIGN_TO_BOARD:
+            if event == Event.ALIGN_BOARD_SUCCESS:
+                rospy.loginfo("对板成功，准备播报货物。")
+                self.transition(RobotState.SPEAK_GOODS)
+            elif event == Event.ALIGN_BOARD_FAILURE:
+                rospy.logwarn("对板失败或超时，仍继续播报货物。")
+                self.transition(RobotState.SPEAK_GOODS)
                 
         elif self.current_state == RobotState.SPEAK_GOODS:
             if event == Event.SPEAK_DONE:
@@ -1381,6 +1403,64 @@ class UnifiedStateMachine(object):
             self.search_timeout_timer.shutdown()
             self.search_timeout_timer = None
 
+    #*********************** 新增：对板功能函数 ***********************#
+    
+    def start_align_board_process(self):
+        """启动对板脚本，并设置监控和超时定时器"""
+        rospy.loginfo("开始启动外部脚本进行对板...")
+        
+        # 检查脚本是否存在
+        if not os.path.exists(self.align_board_script_path):
+            rospy.logerr("对板脚本不存在: %s", self.align_board_script_path)
+            self.handle_event(Event.ALIGN_BOARD_FAILURE)
+            return
+            
+        try:
+            # 启动外部脚本
+            self.align_board_process = subprocess.Popen(["python", self.align_board_script_path])
+            rospy.loginfo("对板脚本已启动，进程ID: %s", self.align_board_process.pid)
+            
+            # 启动监控定时器
+            self.align_board_monitor_timer = rospy.Timer(rospy.Duration(0.5),
+                                                         self.monitor_align_board_process_callback)
+            
+            # 启动超时定时器
+            self.align_board_timeout_timer = rospy.Timer(rospy.Duration(self.align_board_timeout_duration),
+                                                         self.align_board_timeout_callback,
+                                                         oneshot=True)
+        except Exception as e:
+            rospy.logerr("启动对板脚本失败: %s", str(e))
+            self.handle_event(Event.ALIGN_BOARD_FAILURE)
+
+    def monitor_align_board_process_callback(self, event):
+        """监控对板脚本进程的回调函数"""
+        if self.align_board_process is not None:
+            return_code = self.align_board_process.poll()
+            if return_code is not None:
+                rospy.loginfo("对板脚本已结束，返回代码: %s", return_code)
+                self.stop_align_board_timers()
+                self.align_board_process = None
+                self.handle_event(Event.ALIGN_BOARD_SUCCESS)
+
+    def align_board_timeout_callback(self, event):
+        """对板脚本执行超时回调函数"""
+        rospy.logerr("对板脚本执行超时")
+        self.stop_align_board_timers()
+        if self.align_board_process is not None:
+            self.align_board_process.terminate()
+            self.align_board_process = None
+        self.handle_event(Event.ALIGN_BOARD_FAILURE)
+
+    def stop_align_board_timers(self):
+        """停止所有对板相关定时器"""
+        if self.align_board_monitor_timer is not None:
+            self.align_board_monitor_timer.shutdown()
+            self.align_board_monitor_timer = None
+        
+        if self.align_board_timeout_timer is not None:
+            self.align_board_timeout_timer.shutdown()
+            self.align_board_timeout_timer = None
+
     #*********************** 语音播报相关功能 ***********************#
     
     # 调用语音播报服务（同步版本）
@@ -1769,6 +1849,12 @@ class UnifiedStateMachine(object):
         if self.board_detect_process is not None:
             self.board_detect_process.terminate()
             self.board_detect_process = None
+        
+        # 新增：停止对板相关活动
+        self.stop_align_board_timers()
+        if self.align_board_process is not None:
+            self.align_board_process.terminate()
+            self.align_board_process = None
         
         # 停止导航相关活动
         if self.navigation_active:
