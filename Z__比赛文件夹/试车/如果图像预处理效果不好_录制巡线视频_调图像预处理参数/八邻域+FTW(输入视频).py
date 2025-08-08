@@ -15,7 +15,7 @@ PERFORM_HORIZONTAL_FLIP = True  # 是否执行水平翻转
 # 起始点寻找参数
 START_POINT_SCAN_STEP = 10  # 向上扫描的步长（像素）
 # 路径规划参数
-CENTER_LINE_OFFSET = -55  # 从右边线向左偏移的像素数
+CENTER_LINE_OFFSET = -50  # 从右边线向左偏移的像素数
 # 逆透视变换矩阵（从鸟瞰图坐标到原始图像坐标的映射）
 INVERSE_PERSPECTIVE_MATRIX = np.array([
     [-3.365493,  2.608984, -357.317062],
