@@ -845,7 +845,8 @@ class UnifiedStateMachine(object):
             elif event == Event.LIGHT_DETECTED_RED:
                 self.transition(RobotState.NAV_TO_LANE2_OBSERVE_POINT)
             elif event == Event.LIGHT_DETECT_TIMEOUT:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("第一车道检测超时，将尝试第二车道。")
+                self.transition(RobotState.NAV_TO_LANE2_OBSERVE_POINT)
                 
         elif self.current_state == RobotState.SPEAK_LANE1_CLEAR:
             if event == Event.SPEAK_DONE:
@@ -874,7 +875,8 @@ class UnifiedStateMachine(object):
             if event == Event.LIGHT_DETECTED_GREEN:
                 self.transition(RobotState.SPEAK_LANE2_CLEAR)
             elif event == Event.LIGHT_DETECTED_RED or event == Event.LIGHT_DETECT_TIMEOUT:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("第二车道非绿灯（红灯或超时），将返回第一车道重新开始检测。")
+                self.transition(RobotState.NAV_TO_LANE1_OBSERVE_POINT)
                 
         elif self.current_state == RobotState.SPEAK_LANE2_CLEAR:
             if event == Event.SPEAK_DONE:
