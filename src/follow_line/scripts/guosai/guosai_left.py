@@ -116,9 +116,9 @@ AVOIDANCE_FORWARD_SPEED_MPS = 0.15                      # 避障-前进速度 (�
 # 停车区域检测参数 (用于FOLLOW_TO_FINISH状态)
 STOP_ZONE_ROI_HEIGHT_PX = 3        # 从图像底部向上计算的窗口高度
 STOP_ZONE_ROI_WIDTH_PX = 30       # 窗口宽度
-STOP_ZONE_WHITE_PIXEL_THRESH = 0.60  # 窗口中白色像素的百分比阈值
-STOP_ZONE_CONSECUTIVE_FRAMES = 3     # 连续满足条件的帧数
-FOLLOW_TO_FINISH_TIMEOUT_S = 40.0 # 最终冲刺阶段的超时时间 (秒)
+STOP_ZONE_WHITE_PIXEL_THRESH = 0.50  # 窗口中白色像素的百分比阈值
+STOP_ZONE_CONSECUTIVE_FRAMES = 2     # 连续满足条件的帧数
+FOLLOW_TO_FINISH_TIMEOUT_S = 35.0 # 最终冲刺阶段的超时时间 (秒)
 
 # 定义沿墙走的搜索模式（Follow The Wall）
 # 逆时针搜索，用于沿着左侧赛道内边界行走
