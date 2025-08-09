@@ -179,7 +179,7 @@ class UnifiedStateMachine(object):
         # 节点关闭相关变量
         self.shutdown_check_timer = None
         self.shutdown_timeout_timer = None
-        self.qr_shutdown_timeout_duration = 5.0
+        self.qr_shutdown_timeout_duration = 15.0
         # self.yolo_shutdown_check_timer = None # 将被新的通用节点关闭替代
         # self.yolo_shutdown_timeout_timer = None # 将被新的通用节点关闭替代
         # self.yolo_shutdown_timeout_duration = 5.0 # 将被新的通用节点关闭替代
@@ -187,7 +187,7 @@ class UnifiedStateMachine(object):
         # 新增：通用节点关闭控制相关变量 (替代原yolo关闭变量)
         self.nodes_shutdown_check_timer = None
         self.nodes_shutdown_timeout_timer = None
-        self.nodes_shutdown_timeout_duration = 10.0  # 关闭多个节点，超时时间设长一些
+        self.nodes_shutdown_timeout_duration = 20.0  # 关闭多个节点，超时时间设长一些
 
         # 后半段变量
         self.locations = {}
@@ -242,7 +242,7 @@ class UnifiedStateMachine(object):
         self.max_global_search_retries = 2 # 全局“大循环”重试次数 (共1+2=3次)
         
         # 新增：仿真任务相关变量
-        self.PC_IP = '192.168.2.247'  # 请确保这是您电脑的正确IP地址
+        self.PC_IP = '192.168.222.206'  # 请确保这是您电脑的正确IP地址
         self.simulation_timeout_duration = 210.0 # 3分30秒
         self.simulation_found_item = None
         self.simulation_room_location = None
@@ -709,8 +709,8 @@ class UnifiedStateMachine(object):
                 rospy.loginfo("QR节点已成功关闭，准备播报任务类型")
                 self.transition(RobotState.SPEAK_TASK_TYPE)
             elif event == Event.QR_NODE_SHUTDOWN_TIMEOUT:
-                rospy.logerr("QR节点关闭超时")
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("QR节点关闭超时，但仍将继续执行后续任务。")
+                self.transition(RobotState.SPEAK_TASK_TYPE)
                 
         elif self.current_state == RobotState.SPEAK_TASK_TYPE:
             if event == Event.SPEAK_DONE:
@@ -908,7 +908,8 @@ class UnifiedStateMachine(object):
             if event == Event.NODES_SHUTDOWN_COMPLETE:
                 self.transition(RobotState.RELAUNCH_CAMERA_FOR_LINE_FOLLOWING)
             elif event == Event.NODES_SHUTDOWN_TIMEOUT:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("关闭一个或多个最终节点超时，但仍将继续执行后续任务。")
+                self.transition(RobotState.RELAUNCH_CAMERA_FOR_LINE_FOLLOWING)
 
         elif self.current_state == RobotState.NAVIGATION_RECOVERY:
             if event == Event.RECOVERY_DONE:
@@ -1620,7 +1621,7 @@ class UnifiedStateMachine(object):
     # 处理QR节点关闭超时
     def _handle_qr_node_shutdown_timeout(self, event):
         """处理QR节点关闭超时事件"""
-        rospy.logerr("QR节点关闭超时")
+        rospy.logwarn("QR节点关闭超时")
         
         # 停止检查定时器
         if self.shutdown_check_timer:
@@ -1811,7 +1812,7 @@ class UnifiedStateMachine(object):
 
     def _handle_nodes_shutdown_timeout(self, event):
         """处理节点关闭超时情况"""
-        rospy.logerr("关闭一个或多个最终节点超时")
+        rospy.logwarn("关闭一个或多个最终节点超时,但仍将继续执行后续任务。")
         
         if self.nodes_shutdown_check_timer is not None:
             self.nodes_shutdown_check_timer.shutdown()
