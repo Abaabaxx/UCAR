@@ -29,7 +29,4 @@ recovery_behaviors:
   - name: 'rotate_recovery_1'
     type: 'rotate_recovery/RotateRecovery'
 
-  - name: 'rotate_recovery_2'
-    type: 'rotate_recovery/RotateRecovery'
-
 
