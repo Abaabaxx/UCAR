@@ -717,8 +717,8 @@ class UnifiedStateMachine(object):
                 rospy.loginfo("语音播报完成，准备导航至拣货准备区")
                 self.transition(RobotState.NAV_TO_PICK_PREP_AREA)
             elif event == Event.SPEAK_TIMEOUT:
-                rospy.logerr("语音播报超时")
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("语音播报超时，但仍将继续导航至拣货准备区")
+                self.transition(RobotState.NAV_TO_PICK_PREP_AREA)
                 
         # 关键桥梁状态的事件处理
         elif self.current_state == RobotState.NAV_TO_PICK_PREP_AREA:
@@ -804,7 +804,8 @@ class UnifiedStateMachine(object):
             if event == Event.SPEAK_DONE:
                 self.transition(RobotState.NAV_TO_SIMULATION)
             elif event == Event.SPEAK_TIMEOUT:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("语音播报超时，但仍将继续导航至仿真区")
+                self.transition(RobotState.NAV_TO_SIMULATION)
                 
         elif self.current_state == RobotState.NAV_TO_SIMULATION:
             if event == Event.NAV_DONE_SUCCESS:
@@ -825,8 +826,12 @@ class UnifiedStateMachine(object):
                 self.simulation_room_location = "unknown_room"
                 self.transition(RobotState.NAV_TO_TRAFFIC)
             
-        elif self.current_state == RobotState.SPEAK_ROOM and event == Event.SPEAK_DONE:
-            self.transition(RobotState.NAV_TO_TRAFFIC)
+        elif self.current_state == RobotState.SPEAK_ROOM:
+            if event == Event.SPEAK_DONE:
+                self.transition(RobotState.NAV_TO_TRAFFIC)
+            elif event == Event.SPEAK_TIMEOUT:
+                rospy.logwarn("播报房间语音超时，但仍将继续导航至红绿灯区域。")
+                self.transition(RobotState.NAV_TO_TRAFFIC)
             
         elif self.current_state == RobotState.NAV_TO_TRAFFIC and event == Event.SPEAK_DONE:
             self.transition(RobotState.NAV_TO_LANE1_OBSERVE_POINT)
@@ -853,7 +858,9 @@ class UnifiedStateMachine(object):
                 self.final_lane_choice = 'lane1'  # 记录选择的是第一车道
                 self.transition(RobotState.NAV_TO_LANE1_WAITING_POINT)
             elif event == Event.SPEAK_TIMEOUT:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("播报车道1语音超时，但仍将选择该车道继续前进。")
+                self.final_lane_choice = 'lane1'
+                self.transition(RobotState.NAV_TO_LANE1_WAITING_POINT)
                 
         elif self.current_state == RobotState.NAV_TO_LANE1_WAITING_POINT:
             if event == Event.NAV_DONE_SUCCESS:
@@ -883,7 +890,9 @@ class UnifiedStateMachine(object):
                 self.final_lane_choice = 'lane2'  # 记录选择的是第二车道
                 self.transition(RobotState.NAV_TO_LANE2_WAITING_POINT)
             elif event == Event.SPEAK_TIMEOUT:
-                self.transition(RobotState.ERROR)
+                rospy.logwarn("播报车道2语音超时，但仍将选择该车道继续前进。")
+                self.final_lane_choice = 'lane2'
+                self.transition(RobotState.NAV_TO_LANE2_WAITING_POINT)
                 
         elif self.current_state == RobotState.NAV_TO_LANE2_WAITING_POINT:
             if event == Event.NAV_DONE_SUCCESS:
