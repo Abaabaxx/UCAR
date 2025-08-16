@@ -209,8 +209,8 @@ class UnifiedStateMachine(object):
         self.camera_process = None
         self.camera_node_name = "/usb_cam"  # 请根据实际情况确认摄像头节点名
         self.camera_line_following_launch_command = ['roslaunch', 'lby_usb_cam', 'usb_cam_noimg.launch']
-        self.line_following_script_right = "/home/ucar/lby_ws/src/follow_line/scripts/shengsai/shengsai_right.py"
-        self.line_following_script_left = "/home/ucar/lby_ws/src/follow_line/scripts/shengsai/shengsai_left.py"
+        self.line_following_script_right = "/home/ucar/lby_ws/src/follow_line/scripts/guosai/guosai_right.py"
+        self.line_following_script_left = "/home/ucar/lby_ws/src/follow_line/scripts/guosai/guosai_left.py"
         self.line_following_status_sub = None
         self.line_following_timeout_timer = None
         self.line_following_timeout = 300.0 # 巡线任务超时时间（5分钟）
@@ -324,7 +324,7 @@ class UnifiedStateMachine(object):
             # 后半段位置
             'up_point': self.create_pose(1.25, 3.75, 0.7071, 0.7071),
             'down_point': self.create_pose(1.25, 3.75, -0.7071, 0.7071),
-            'simulation_area': self.create_pose(1.25, 3.75, 0.7071, 0.7071),
+            'simulation_area': self.create_pose(1.30, 3.75, 0.7071, 0.7071),
             'lane1_observe_point': self.create_pose(3.25, 4.25, 0.7071, 0.7071),
             'lane2_observe_point': self.create_pose(4.25, 4.25, 0.7071, 0.7071),
             'lane1_waiting_point': self.create_pose(2.75, 3.75, -0.7071, 0.7071),
@@ -730,7 +730,9 @@ class UnifiedStateMachine(object):
             if event == Event.NAV_DONE_SUCCESS:
                 rospy.loginfo("导航至拣货准备区完成，开始后半段流程")
                 # 关键桥梁：转换到后半段起始状态
-                self.transition(RobotState.NAVIGATE_TO_UP_POINT)
+                # !!!!修改guosai 国赛
+                self.transition(RobotState.NAV_TO_SIMULATION)
+                # self.transition(RobotState.NAVIGATE_TO_UP_POINT)
             elif event == Event.NAV_DONE_FAILURE:
                 rospy.logwarn("导航失败，进入恢复状态...")
                 self.state_before_recovery = self.current_state

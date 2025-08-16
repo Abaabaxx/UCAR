@@ -61,7 +61,7 @@ DEBUG_IMAGE_TOPIC = "/line_follower/debug_image"  # 新增：调试图像发布�
 GAUSSIAN_KERNEL_SIZE = (5, 5)  # 高斯核大小
 GAUSSIAN_SIGMA_X = 0  # 标准差，0表示根据核大小自动计算
 # Canny边缘检测参数
-CANNY_LOW_THRESHOLD = 50
+CANNY_LOW_THRESHOLD = 48
 CANNY_HIGH_THRESHOLD = 150
 # 图像翻转参数
 PERFORM_HORIZONTAL_FLIP = True  # 是否执行水平翻转
@@ -73,7 +73,7 @@ START_POINT_SEARCH_MIN_Y = 120 # 允许寻找起始点的最低Y坐标(从顶部
 LOOKAHEAD_DISTANCE = 10  # 胡萝卜点与基准点的距离（像素）
 PRINT_HZ = 4  # 打印error的频率（次/秒）
 # 路径规划参数
-CENTER_LINE_OFFSET = -45  # 从右边线向左偏移的像素数
+CENTER_LINE_OFFSET = -52  # 从右边线向左偏移的像素数
 # 速度控制参数
 LINEAR_SPEED = 0.1  # 前进速度 (m/s)
 ERROR_DEADZONE_PIXELS = 15  # 误差死区（像素），低于此值则认为方向正确
@@ -110,15 +110,15 @@ ODOM_TOPIC = "/odom"                                   # 里程计话题
 AVOIDANCE_STRAFE_OUTWARD_M = 0.5                      # 避障-外侧平移距离 (米)
 AVOIDANCE_STRAFE_INWARD_M = 0.465                       # 避障-内侧平移距离 (米)
 AVOIDANCE_FORWARD_DISTANCE_M = 0.58                     # 避障-前进距离 (米)
-AVOIDANCE_STRAFE_SPEED_MPS = 0.15                       # 避障-平移速度 (米/秒)
-AVOIDANCE_FORWARD_SPEED_MPS = 0.15                      # 避障-前进速度 (米/秒)
+AVOIDANCE_STRAFE_SPEED_MPS = 0.25                       # 避障-平移速度 (米/秒)
+AVOIDANCE_FORWARD_SPEED_MPS = 0.25                      # 避障-前进速度 (米/秒)
 
 # 停车区域检测参数 (用于FOLLOW_TO_FINISH状态)
 STOP_ZONE_ROI_HEIGHT_PX = 3        # 从图像底部向上计算的窗口高度
 STOP_ZONE_ROI_WIDTH_PX = 30       # 窗口宽度
 STOP_ZONE_WHITE_PIXEL_THRESH = 0.50  # 窗口中白色像素的百分比阈值
 STOP_ZONE_CONSECUTIVE_FRAMES = 2     # 连续满足条件的帧数
-FOLLOW_TO_FINISH_TIMEOUT_S = 35.0 # 最终冲刺阶段的超时时间 (秒)
+FOLLOW_TO_FINISH_TIMEOUT_S = 19.0 # 最终冲刺阶段的超时时间 (秒)
 
 # 定义沿墙走的搜索模式（Follow The Wall）
 # 逆时针搜索，用于沿着左侧赛道内边界行走
@@ -165,7 +165,7 @@ ALIGN_OBSERVATION_ANGLE_TOL_DEG = 20.0  # 与入口板平行时的观察角度�
 # 状态三: ADJUST_LATERAL_POSITION (与左侧板保持距离)
 # ==============================================================================
 # --- 行为参数 ---
-ADJUST_TARGET_LATERAL_DIST_M = 2.0      # 与左侧板的目标横向距离 (米)
+ADJUST_TARGET_LATERAL_DIST_M = 1.84      # 需要测量的参数2：与左侧板的目标横向距离 (米)
 ADJUST_LATERAL_SPEED_M_S = 0.08          # 横向平移速度 (米/秒)
 ADJUST_LATERAL_POS_TOL_M = 0.02         # 横向位置容差 (米)
 
@@ -191,7 +191,7 @@ DRIVE_TO_CENTER_POS_TOL_M = 0.02      # 中心位置容差 (米)
 DRIVE_TO_CENTER_TARGET_ANGLE_DEG = -90.0  # 扫描中心: 右侧 (-90度)
 DRIVE_TO_CENTER_SCAN_RANGE_DEG = 180.0     # 扫描范围: 中心±90度
 DRIVE_TO_CENTER_MIN_DIST_M = 0.2          # 最小检测距离
-DRIVE_TO_CENTER_MAX_DIST_M = 1.5          # 最大检测距离
+DRIVE_TO_CENTER_MAX_DIST_M = 1.8          # 最大检测距离
 DRIVE_TO_CENTER_MIN_LENGTH_M = 0.4        # 短板最小长度 (米)
 DRIVE_TO_CENTER_MAX_LENGTH_M = 0.6        # 短板最大长度 (米)
 DRIVE_TO_CENTER_CORRECTION_ANGLE_TOL_DEG = 2.0  # 直行到中心时的姿态修正角度容忍度 (度)
@@ -202,8 +202,8 @@ DRIVE_TO_CENTER_OBSERVATION_ANGLE_TOL_DEG = 45.0  # 直行到中心时的观察�
 # ==============================================================================
 # --- 行为参数 ---
 CIRCLE_LINEAR_SPEED_M_S = 0.2  # 前进线速度 (m/s)
-CIRCLE_RADIUS_M = 0.45          # 期望的圆环半径 (m)
-CIRCLE_BLIND_DRIVE_RATIO = 0.8 # 盲走阶段占整个圆周运动的比例 (估算值)
+CIRCLE_RADIUS_M = 0.42          # 需要测量的参数1：期望的圆环半径 (m)
+CIRCLE_BLIND_DRIVE_RATIO = 0.72 # 盲走阶段占整个圆周运动的比例 (估算值)
 
 # --- 检测参数 (右侧出口板) ---
 CIRCLE_EXIT_TARGET_ANGLE_DEG = -90.0 # 扫描中心: 右侧 (-90度)
@@ -222,8 +222,8 @@ CIRCLE_EXIT_CENTER_X_TOL_M = 0.15    # 出口板中心点X坐标容差 (米)
 EXIT_TARGET_ANGLE_DEG = 0.0           # 扫描中心: 正前方 (0度)
 EXIT_SCAN_RANGE_DEG = 100.0           # 扫描范围: 中心±50度
 EXIT_MIN_DIST_M = 0.2                 # 最小检测距离
-EXIT_MAX_DIST_M = 2                 # 最大检测距离
-EXIT_MIN_LENGTH_M = 0.30               # 板子最小长度 (米)
+EXIT_MAX_DIST_M = 1.5                 # 最大检测距离
+EXIT_MIN_LENGTH_M = 0.37               # 板子最小长度 (米)
 EXIT_MAX_LENGTH_M = 0.63               # 板子最大长度 (米)
 EXIT_ANGLE_TOL_DEG = 4.0              # 正对出口板时的角度容忍度 (度)
 
@@ -364,6 +364,7 @@ class LineFollowerNode:
         
         # 初始化状态机控制标志
         self.realign_cycle_completed = False
+        self.has_completed_circle = False
         
         # 初始化避障标志位
         self.obstacle_detected = False # 避障标志位
@@ -1264,13 +1265,21 @@ class LineFollowerNode:
         
         elif self.current_state == STRAIGHT_TRANSITION:
             if is_line_found and line_y >= (IPM_ROI_H - STRAIGHT_TRANSITION_EXIT_FROM_BOTTOM_PX):
-                rospy.loginfo("状态转换: STRAIGHT_TRANSITION -> ALIGN_WITH_ENTRANCE_BOARD")
                 self.stop() # 立即停车
-                self.current_state = ALIGN_WITH_ENTRANCE_BOARD
-                # 重置所有内部阶段标志
-                self.s3_dist_achieved = False
-                self.s4_pos_achieved = False
-                self.is_angle_correction_ok = False
+                
+                if self.has_completed_circle:
+                    # 如果已经完成了环岛，则进入省赛的"旋转正对"逻辑
+                    rospy.loginfo("状态转换 (后环岛): STRAIGHT_TRANSITION -> ROTATE_TO_FACE_EXIT_BOARD")
+                    self.current_state = ROTATE_TO_FACE_EXIT_BOARD
+                else:
+                    # 否则，按原计划进入国赛的"旋转平行"逻辑
+                    rospy.loginfo("状态转换 (入环前): STRAIGHT_TRANSITION -> ALIGN_WITH_ENTRANCE_BOARD")
+                    self.current_state = ALIGN_WITH_ENTRANCE_BOARD
+                    # 重置所有内部阶段标志
+                    self.s3_dist_achieved = False
+                    self.s4_pos_achieved = False
+                    self.is_angle_correction_ok = False
+
                 # 关键：立即发布停车指令并结束本次循环，避免执行旧状态的逻辑
                 self.cmd_vel_pub.publish(twist_msg)
                 return
@@ -1471,30 +1480,15 @@ class LineFollowerNode:
                 else:
                     self.stop() # 半径过小，直接停止
             
-            # --- 阶段B: 搜索与停止阶段 ---
+            # --- 阶段B: 切换到后环岛逻辑 ---
             else:
-                # 检查所有停止条件
-                is_angle_ok = abs(angle_dev) <= CIRCLE_EXIT_ANGLE_TOL_DEG
-                is_center_ok = abs(center_x) <= CIRCLE_EXIT_CENTER_X_TOL_M
-                
-                if is_exit_board_found and is_angle_ok and is_center_ok:
-                    rospy.loginfo("状态转换: DRIVE_IN_CIRCLE -> ROTATE_TO_FACE_EXIT_BOARD (出口板已找到并对准)")
-                    rospy.loginfo("停止条件详情: 板子角度偏差 %.2f°, 中心X偏差 %.2f m", angle_dev, center_x)
-                    self.stop()
-                    self.current_state = ROTATE_TO_FACE_EXIT_BOARD
-                    # 立即发布停止指令并结束本次循环
-                    self.cmd_vel_pub.publish(Twist())
-                    return
-                else:
-                    # 如果条件不满足，继续圆周运动并打印日志
-                    if CIRCLE_RADIUS_M > 1e-3:
-                        angular_velocity = CIRCLE_LINEAR_SPEED_M_S / CIRCLE_RADIUS_M
-                        twist_msg.linear.x = CIRCLE_LINEAR_SPEED_M_S
-                        twist_msg.angular.z = angular_velocity
-                        rospy.loginfo_throttle(1, "状态: %s | 阶段B - 搜索中 (找到:%r, 角度OK:%r, 中心OK:%r)",
-                                             STATE_NAMES[self.current_state], is_exit_board_found, is_angle_ok, is_center_ok)
-                    else:
-                        self.stop()
+                rospy.loginfo("状态转换: DRIVE_IN_CIRCLE -> FOLLOW_RIGHT (盲走结束，切换到后环岛逻辑)")
+                self.stop()
+                self.has_completed_circle = True # 设置标志位
+                self.current_state = FOLLOW_RIGHT
+                # 立即发布停止指令并结束本次循环
+                self.cmd_vel_pub.publish(Twist())
+                return
         
         elif self.current_state == ROTATE_TO_FACE_EXIT_BOARD:
             # 从实例变量中安全地读取出口板子的检测结果
