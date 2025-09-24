@@ -38,31 +38,36 @@
 
 #### 聚类找板演示
 
-<img src="assets/找板.gif" width="40%">
-
+<p align="center">
+   <img src="assets/找板.gif" width="40%">
+</p>
 
 
 #### 巡线
 
-<img src="assets/巡线.gif" width="40%">
-
+<p align="center">
+   <img src="assets/巡线.gif" width="40%">
+</p>
 
 
 #### 巡线上位机调参
-
-<img src="assets/上位机.gif" width="40%">
+<p align="center">
+   <img src="assets/上位机.gif" width="40%">
+</p>
 
 
 
 #### 仿真
 
-<img src="assets/仿真.gif" width="40%">
-
+<p align="center">
+   <img src="assets/仿真.gif" width="40%">
+</p>
 
 
 #### 全流程
-
-<img src="assets/全流程.gif" width="40%">
+<p align="center">
+   <img src="assets/全流程.gif" width="40%">
+</p>
 
 ## 结构说明
 
