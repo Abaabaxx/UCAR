@@ -1,0 +1,8 @@
+# --- 请求部分 ---
+string item_to_find  # UCAR 告诉 PC 要找什么货物
+
+---
+
+# --- 响应部分 ---
+string room_location # PC 返回货物所在房间
+string found_item_name # PC 返回货物的具体种类

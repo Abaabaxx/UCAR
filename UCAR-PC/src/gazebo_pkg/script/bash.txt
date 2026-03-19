@@ -1,0 +1,101 @@
+1-C房间观测点1：
+rostopic pub /move_base_simple/goal geometry_msgs/PoseStamped "
+header:
+  stamp: now
+  frame_id: 'map'
+pose: 
+  position: 
+    x: 3.520860195159912
+    y: 0.6933646202087402
+    z: 0.0
+  orientation: 
+    x: 0.0
+    y: 0.0
+    z: 0.5552674883213985
+    w: 0.8316718201389569
+    "
+2-C房间观测点2:
+rostopic pub /move_base_simple/goal geometry_msgs/PoseStamped "
+header:
+  stamp: now
+  frame_id: 'map'
+pose: 
+  position: 
+    x: 3.7584171295166016
+    y: 2.073887825012207
+    z: 0.0
+  orientation: 
+    x: 0.0
+    y: 0.0
+    z: 0.36341517937667966
+    w: 0.9316272899602156
+    "
+
+3-B房间观测点:
+rostopic pub /move_base_simple/goal geometry_msgs/PoseStamped "
+header:
+  stamp: now
+  frame_id: 'map'
+pose: 
+  position: 
+    x: 2.8548004627227783
+    y: 1.0420169830322266
+    z: 0.0
+  orientation: 
+    x: 0.0
+    y: 0.0
+    z: 0.8185138937393395
+    w: 0.5744867324452892
+    "
+
+
+4-A房间观测点:
+rostopic pub /move_base_simple/goal geometry_msgs/PoseStamped "
+header:
+  stamp: now
+  frame_id: 'map'
+pose: 
+  position: 
+    x: 1.0426336526870728
+    y: 0.8178969025611877
+    z: 0.0
+  orientation: 
+    x: 0.0
+    y: 0.0
+    z: 0.798000045307492
+    w: 0.6026573883138252
+    "
+
+5-返程中间点:
+rostopic pub /move_base_simple/goal geometry_msgs/PoseStamped "
+header:
+  stamp: now
+  frame_id: 'map'
+pose: 
+  position: 
+    x: 4.238326549530029
+    y: 0.9244804382324219
+    z: 0.0
+  orientation: 
+    x: 0.0
+    y: 0.0
+    z: -0.6074919171092937
+    w: 0.7943258592333974
+    "
+
+6-回到初始点
+rostopic pub /move_base_simple/goal geometry_msgs/PoseStamped "
+header:
+  stamp: now
+  frame_id: 'map'
+pose: 
+  position: 
+    x: 0.1385047435760498
+    y: 0.03395068645477295
+    z: 0.0
+  orientation: 
+    x: 0.0
+    y: 0.0
+    z: -0.005471294456532419
+    w: 0.9999850323564697
+    "

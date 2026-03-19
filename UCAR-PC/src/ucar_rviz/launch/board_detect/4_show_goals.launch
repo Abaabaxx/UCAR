@@ -1,0 +1,7 @@
+<launch>
+<!-- 可视化：
+  1.长度过滤 + ROI区域过滤 的聚类
+  2.正对板子前方的位姿
+-->  
+<node name="rviz" pkg="rviz" type="rviz" output="screen" args="-d $(find ucar_rviz)/rviz/4_show_goals.rviz" />
+</launch>

@@ -1,0 +1,8 @@
+<launch>
+<!-- 可视化：
+  1.ROI区域
+  2.长度过滤 + ROI区域过滤 的聚类
+-->
+
+<node name="rviz" pkg="rviz" type="rviz" output="screen" args="-d $(find ucar_rviz)/rviz/3_show_roi_clusters.rviz" />
+</launch>

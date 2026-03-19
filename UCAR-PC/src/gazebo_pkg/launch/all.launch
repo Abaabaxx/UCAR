@@ -1,0 +1,7 @@
+<launch>
+    <include file="$(find gazebo_pkg)/launch/race.launch" />
+
+    <include file="$(find darknet_ros)/launch/darknet_ros.launch" />
+
+    <include file="$(find gazebo_nav)/launch/gazebo_nav.launch" />
+</launch>

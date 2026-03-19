@@ -1,0 +1,9 @@
+<launch>
+<!-- 可视化：所有的聚类
+  1.ROI区域
+  2.原始聚类
+  3.长度过滤的聚类
+  4.长度过滤 + ROI区域过滤 的聚类
+-->
+  <node name="rviz" pkg="rviz" type="rviz" output="screen" args="-d $(find ucar_rviz)/rviz/all_clusters.rviz" />
+</launch>

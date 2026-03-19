@@ -1,0 +1,7 @@
+<launch>
+<!-- 可视化：
+  1.长度过滤 的聚类
+-->  
+
+<node name="rviz" pkg="rviz" type="rviz" output="screen" args="-d $(find ucar_rviz)/rviz/2_show_part_clusters.rviz" />
+</launch>

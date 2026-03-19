@@ -1,0 +1,41 @@
+# =========================
+# ROS / Catkin / Colcon
+# =========================
+build/
+devel/
+install/
+
+# 日志文件
+log/
+logs/
+*.log
+
+# 编译数据库
+compile_commands.json
+.catkin_tools/
+
+# =========================
+# IDE / 编辑器配置
+# =========================
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# =========================
+# Python 缓存
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+
+# =========================
+# 临时文件 / 编译产物
+# =========================
+*.so
+*.a
+*.out
+index.html*
+.catkin_workspace
+datasets/
