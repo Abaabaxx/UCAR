@@ -1,0 +1,20 @@
+<launch>
+  <!--该launch文件实用于用ekf数据融合的底盘驱动-->
+  <node pkg="ucar_controller" name="base_driver" type="base_driver" output="screen" >
+    <rosparam command="load" file="$(find ucar_controller)/config/driver_params_mini.yaml" />
+    <!-- 将 provide_odom_tf 参数设置为 false -->
+    <!-- 禁止发布 odom->base_link的tf 这一段tf由ekf节点发布 -->
+    <param name="provide_odom_tf" value="false" />
+  </node>
+
+  <!-- 启动扩展卡尔曼滤波器(EKF)节点 -->
+  <!-- 该节点订阅 /odom 和 /imu, 融合它们的数据, 并发布一个更准确的 /odometry/filtered 话题 -->
+  <!-- 以及一个更平滑、更精确的 odom -> base_link TF变换。 -->
+  <node pkg="robot_localization" type="ekf_localization_node" name="ekf_se" clear_params="true">
+      
+      <rosparam command="load" file="$(find ucar_nav)/config/ekf/ekf.yaml" />
+      
+      <!-- (可选但推荐) 将默认的输出话题名 odometry/filtered 映射到根命名空间下，便于访问 -->
+      <remap from="odometry/filtered" to="/odometry/filtered" />  
+  </node>
+</launch> 

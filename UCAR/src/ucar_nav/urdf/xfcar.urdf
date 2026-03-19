@@ -1,0 +1,151 @@
+<robot name="robot">
+	<!-- <link name="base_footprint">
+   		<visual>
+			<geometry>
+      			<box size="0.001 0.001 0.001"/>
+     		</geometry>
+			<origin rpy="0 0 0" xyz="0 0 0"/>
+   		</visual>
+ 	</link> -->
+	<link name="base_link">
+   		<visual>
+			<geometry>
+      			<box size="0.155 0.34 0.15"/>
+     		</geometry>
+			<origin rpy="0 0 1.5707963" xyz="0 0 0"/>  
+			<material name="white">
+				<color rgba="1 1 1 1"/>
+			</material>
+   		</visual> 
+ 	</link>
+	<!-- <joint name="base_footprint_joint" type="fixed">
+		<origin xyz="0 0 0" />
+		<parent link="base_footprint" />
+		<child link="base_link" />
+	</joint> -->
+
+ 	<link name="wheel_1">
+   		<visual>
+     			<geometry>
+       				<cylinder length="0.05" radius="0.05"/>
+     			</geometry>
+			<origin rpy="0 0 0" xyz="0 0 0"/>
+   			<material name="black">
+				<color rgba="0 0 0 1"/>
+			</material>
+		</visual>
+		<mu1>0.5</mu1>
+		<mu2>0.5</mu2>
+ 	</link>
+ 	<link name="wheel_2">
+   		<visual>
+     			<geometry>
+       				<cylinder length="0.05" radius="0.05"/>
+     			</geometry>
+			<origin rpy="0 0 0" xyz="0 0 0"/>
+   			<material name="black"/>
+   		</visual>
+		<mu1>0.5</mu1>
+		<mu2>0.5</mu2>
+ 	</link>
+ 	<link name="wheel_3">
+   		<visual>
+     			<geometry>
+       				<cylinder length="0.05" radius="0.05"/>
+     			</geometry>
+			<origin rpy="0 0 0" xyz="0 0 0"/>
+   			<material name="black"/>
+   		</visual>
+		<mu1>0.5</mu1>
+		<mu2>0.5</mu2>
+ 	</link>
+ 	<link name="wheel_4">
+   		<visual>
+     			<geometry>
+       				<cylinder length="0.05" radius="0.05"/>
+     			</geometry>
+			<origin rpy="0 0 0" xyz="0 0 0" />
+   			<material name="black"/>
+   		</visual>
+		<mu1>0.5</mu1>
+		<mu2>0.5</mu2>  
+ 	</link>
+    <joint name="base_to_wheel1" type="continuous">
+        <parent link="base_link"/>
+        <child link="wheel_1"/>
+        <origin rpy="-1.5707963 0 0" xyz="0.105 0.11625 0.045"/>
+        <axis xyz="0 0 1" />
+    </joint>
+    <joint name="base_to_wheel2" type="continuous">
+        <axis xyz="0 0 1" />
+        <anchor xyz="0 0 0" />
+        <limit effort="100" velocity="100" />
+        <parent link="base_link"/>
+        <child link="wheel_2"/>
+        <origin rpy="-1.5707963 0 0" xyz="-0.115 0.11625 0.045"/>
+    </joint>
+    <joint name="base_to_wheel3" type="continuous">
+        <parent link="base_link"/>
+        <axis xyz="0 0 1" />
+        <child link="wheel_3"/>
+        <origin rpy="-1.5707963 0 0" xyz="0.105 -0.11625 0.045"/>
+    </joint>
+    <joint name="base_to_wheel4" type="continuous">
+        <parent link="base_link"/>
+        <axis xyz="0 0 1" />
+        <child link="wheel_4"/>
+        <origin rpy="-1.5707963 0 0" xyz="-0.115 -0.11625 0.045"/>
+    </joint>
+    <joint name="imu_joint" type="fixed">
+        <axis xyz="0 1 0" />
+        <origin xyz="0 0 0.125" rpy="0 0 0"/>
+        <parent link="base_link"/>
+        <child link="imu"/>
+    </joint>
+    <link name="imu">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+                <geometry>
+                    <box size="0.05 0.05 0.05"/>
+                </geometry>
+                <material name="green">
+                    <color rgba="0 1 0 1"/>
+                </material>
+        </visual>
+    </link>
+
+    <joint name="camera_joint" type="fixed">
+        <axis xyz="0 1 0" />
+        <origin xyz="0.135 0 0.15" rpy="0 0 0"/>
+        <parent link="base_link"/>
+        <child link="camera_link"/>
+    </joint>
+    <link name="camera_link">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+                <geometry>
+	                <box size="0.05 0.05 0.05"/>
+                </geometry>
+                <material name="red">
+	                <color rgba="1 0 0 1"/>
+                </material>
+        </visual>
+    </link>
+    <joint name="hokuyo_joint" type="fixed">
+        <origin xyz="-0.1 0.0 0.195" rpy="0 0 0"/>
+        <parent link="base_link"/>
+        <axis xyz="0 1 0" />
+        <child link="laser_frame"/>
+    </joint>
+    <link name="laser_frame">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+                <geometry>
+	                <box size="0.05 0.05 0.05"/>
+                </geometry>
+                <material name="red">
+	                <color rgba="1 0 0 1"/>
+                </material>
+        </visual>
+    </link>
+</robot>

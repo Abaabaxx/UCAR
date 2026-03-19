@@ -1,0 +1,133 @@
+# =====================================================================
+# TebLocalPlannerROS 参数配置 (结构化注释版)
+# =====================================================================
+# 说明：本文件包含 TEB (Timed Elastic Band) 局部路径规划器的参数配置。
+# TEB 是一个基于优化的规划器，其行为高度依赖于这些参数的权衡。
+# 请根据您的机器人特性、传感器精度、计算能力和应用场景仔细测试与调整。
+# =====================================================================
+# 该版本基于ljc的line footprint的版本修改
+# 将避障权重 weight_obstacle 从 30 提高到 100。
+# 将速度权重 weight_optimaltime 从 2 降低到 1。
+# 将最大 x 轴速度从 1.1 降低到 0.6，
+
+TebLocalPlannerROS:
+
+  # === 1. 基础设置 ===
+  odom_topic: odom             # 里程计话题名称
+
+  # === 2. 轨迹参数 ===
+  # --- 轨迹生成与离散化 ---
+  teb_autosize: True             # 自动调整轨迹中的姿态点数量 (推荐)
+  dt_ref: 0.3                    # 轨迹的时间分辨率(秒)。较小值模拟更精细，较大值(>0.6)可能导致轨迹不可行。
+  dt_hysteresis: 0.05            # 时间分辨率的迟滞量，用于防止频繁切换。
+  max_samples: 500               # 轨迹中允许的最大姿态点数量。
+
+  # --- 全局路径跟随与处理 ---
+  global_plan_overwrite_orientation: True # 允许TEB修改全局路径点的朝向以生成更平滑轨迹 (推荐)。
+  allow_init_with_backwards_motion: False # 不允许以倒车开始执行新轨迹。
+  max_global_plan_lookahead_dist: 1.0   # (米) TEB参考前方全局路径的最大距离。值越小，越贴合全局路径，但会削弱避障能力。
+  global_plan_viapoint_sep: 0.5       # (米) 在全局路径上每隔多远插入一个吸引TEB的路径点(via-point)。减小此值会增强全局路径跟随性。
+  global_plan_prune_distance: 1         # (米) 清理机器人后方多远距离之外的全局路径点。
+
+  # --- 轨迹可行性检查 ---
+  exact_arc_length: False          # 是否精确计算弧长（计算量稍大）。
+  feasibility_check_no_poses: 1    # 【！！！高风险！！！】检查轨迹是否碰撞时，仅检查从起点开始的几个姿态点。值为1表示只检查第一个点，**极大地削弱了碰撞检测的可靠性**，可能导致后续轨迹碰撞。**强烈建议增加此值 (例如 3-5)**。
+  publish_feedback: False          # 是否发布详细的优化过程反馈消息。
+
+  # === 3. 机器人参数 ===
+  # --- 运动学限制 ---
+  max_vel_x: 1.1                   # (米/秒) 最大前进速度。
+  max_vel_x_backwards: 0.4         # (米/秒) 最大后退速度。
+  max_vel_y: 0.0                   # (米/秒) 最大横向速度 (差速驱动通常为0)。
+  max_vel_theta: 1.0               # (弧度/秒) 最大角速度。
+  acc_lim_x: 0.5                   # (米/秒^2) 最大X轴加速度。
+  acc_lim_y: 0.0                   # (米/秒^2) 最大Y轴加速度 (差速驱动通常为0)。
+  acc_lim_theta: 2.0               # (弧度/秒^2) 最大角加速度。
+  min_turning_radius: 0.0          # (米) 最小转弯半径 (0 表示差速驱动，可原地旋转)。
+
+  # --- 机器人足迹模型 ---
+  # 用于碰撞检测和距离计算。
+  footprint_model: # 投影模型 # types: "point", "circular", "line", "two_circles", "polygon"
+    type: "line"
+    # radius: 0.1 # for type "circular"
+    line_start: [-0.12, 0.0] # for type "line"
+    line_end: [0.12, 0.0] # for type "line"
+    # front_offset: 0.16 # for type "two_circles"  (注释掉，因为 type 是 line)
+    # front_radius: 0.16 # for type "two_circles"  (注释掉，因为 type 是 line)
+    # rear_offset: 0.16 # for type "two_circles"   (注释掉，因为 type 是 line)
+    # rear_radius: 0.16 # for type "two_circles"    (注释掉，因为 type 是 line)
+    # vertices: [[0.171, -0.128], [0.171, 0.128],[-0.171, 0.128], [-0.171, -0.128]] # for polygen (注释掉，因为 type 是 line)
+
+  # === 4. 目标容忍度 ===
+  xy_goal_tolerance: 0.2           # (米) 到达目标点的最终位置容忍半径。
+  yaw_goal_tolerance: 0.3 # defualt 0.3
+  free_goal_vel: False # default False | 设为False时，车辆到达终点时的目标速度为0，否则即全速冲线
+  complete_global_plan: True
+
+  # === 5. 障碍物处理 ===
+  # --- 障碍物距离与膨胀 ---
+  min_obstacle_dist: 0.28 # default 0.25 | 与障碍物的最小期望距离 This value must also include our robot radius, since footprint_model is set to "point".
+  inflation_dist: 0.6 # default 0.6 | 障碍物周围的缓冲区，进缓冲区会导致规划器减速,需要比min_obstacle_dist大
+  include_costmap_obstacles: True # 必须设置成true才能规避实时探测到的障碍
+  costmap_obstacles_behind_robot_dist: 1.0 # default 1.5 为了允许安全的转弯行为，该值应该是非零的。 较高的值包括更多优化障碍。考虑后方n米范围内的障碍物，设置的越大，考虑范围越广
+  obstacle_poses_affected: 10 # default 15 offical 30 | 因为障碍物而受到影响的poses数量（基于距离障碍物最近的pose，向两边扩展的点数）
+
+  # --- 动态障碍物 (当前已禁用) ---
+  include_dynamic_obstacles: False # default true | 是否将动态障碍物预测为速度模型
+  dynamic_obstacle_inflation_dist: 0.15 # default 0.6 | 动态障碍物的膨胀范围
+  
+
+  # === 6. 优化参数 ===
+  # --- 优化器控制 ---
+  no_inner_iterations: 2 # 被外循环调用后内循环执行优化次数#############################
+  no_outer_iterations: 2 # 执行的外循环的优化次数###################################
+  optimization_activate: True # 激活优化
+  optimization_verbose: False # 打印优化过程详情
+  penalty_epsilon: 0.1 # default 0.1 会为速度的约束提供一个缓冲的效果，就是在到达速度限制前会产生一定的惩罚让其提前减速达到缓冲的效果。
+  obstacle_cost_exponent: 4
+  weight_max_vel_x: 2 # default 2 | 在整个运动过程中以主要以高速还是低速运行，则是看这些权重的分配
+  weight_max_vel_theta: 0.8 #default 1
+  weight_acc_lim_x: 1 # defualt 1
+  weight_acc_lim_theta: 0.8
+  weight_kinematics_nh: 1000 # default 1000| 面向non-holonomic robots的运动学约束的权重
+  weight_kinematics_forward_drive: 1000 # default 1 | 0~1000，倒车惩罚权重，越大越不容易倒车
+  weight_kinematics_turning_radius: 200 # default 1 | 0~1000 机器人最小转向半径的权重，越大则越容易达到最小转向半径的情况
+  weight_optimaltime: 2 #zf3 default 1 | 最优时间权重。must be > 0 如果大了，那么车会在直道上快速加速，并且路径规划的也会切内道，这个参数越小，整个过程的车速会越稳定
+  weight_shortest_path: 0
+  weight_obstacle: 30 #zf20 default 100 避障在整个优化函数中的权重
+  weight_inflation: 0.3  #zf0.2
+  weight_dynamic_obstacle: 10 # default 10
+  weight_dynamic_obstacle_inflation: 0.2
+  weight_viapoint: 1 # default 1 | 提高和降低会明显改变输出轨迹的跟随力度
+  weight_adapt_factor: 2 # default 2 | 
+
+  # === 7. 同伦类规划 (多路径选择 - 当前已禁用) ===
+  enable_homotopy_class_planning: False # 是否启用同伦类规划（探索拓扑不同的路径，如从障碍物两边绕行）。禁用可减少计算量，但在某些场景可能找不到解。
+  enable_multithreading: False
+  max_number_classes: 1 # 最大备选路径数量
+  selection_cost_hysteresis: 1.0
+  selection_prefer_initial_plan: 0.9
+  selection_obst_cost_scale: 100.0
+  selection_alternative_time_cost: False
+
+  roadmap_graph_no_samples: 15
+  roadmap_graph_area_width: 5
+  roadmap_graph_area_length_scale: 1.0
+  h_signature_prescaler: 0.5
+  h_signature_threshold: 0.1
+  obstacle_heading_threshold: 0.45
+  switching_blocking_period: 0.0
+  viapoints_all_candidates: True
+  delete_detours_backwards: True
+  max_ratio_detours_duration_best_duration: 3.0
+  visualize_hc_graph: False
+  visualize_with_time_as_z_axis_scale: False
+
+  # === 8. 恢复行为 ===
+  shrink_horizon_backup: True
+  shrink_horizon_min_duration: 10
+  oscillation_recovery: True
+  oscillation_v_eps: 0.1
+  oscillation_omega_eps: 0.1
+  oscillation_recovery_min_duration: 10
+  oscillation_filter_duration: 10

@@ -1,0 +1,21 @@
+<launch>
+<!--麦克风唤醒和主麦克风设置-->
+
+  <!--设置为功能包的路径-->
+  <arg name="package_path" default = "$(find xf_mic_asr_offline)" />
+
+  <!-- 添加客户端节点延迟启动参数 -->
+  <arg name="start_delay" default="10.0" />
+
+  <!-- 启动麦克风节点 -->
+  <node pkg="xf_mic_asr_offline" type="xf_asr_offline_node" name="xf_asr_offline_node" output="screen">
+    <param name="source_path" type="string" value="$(arg package_path)"/>
+    <rosparam command="load" file="$(find xf_mic_asr_offline)/config/mic_offline_params.yaml" />
+  </node>
+
+  <!-- 启动设置唤醒词的客户端节点 延后3秒启动-->
+  <!-- 讯飞麦克风默认唤醒词为“小飞小飞” 不用再用客户端定义-->
+  <!-- <node pkg="xf_mic_asr_offline" type="client_node" name="client_node" output="screen"
+        launch-prefix="bash -c 'sleep $(arg start_delay); $0 $@'" >
+  </node> -->
+</launch>

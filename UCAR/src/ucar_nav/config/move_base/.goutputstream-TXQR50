@@ -1,0 +1,42 @@
+EBandPlannerROS:
+  # common parameters
+  xy_goal_tolerance: 0.4 #Distance tolerance for reaching the goal pose
+  yaw_goal_tolerance: 1.0 #Orientation tolerance for reaching the desired goal pose
+  rot_stopped_vel: 0.01 #  确定机器人是否应该停止 以避免极限循环或锁定的 角速度下限
+  trans_stopped_vel: 0.01 #  确定机器人是否应该停止 以避免极限循环或锁定的 线速度下限
+
+  # visualization parameters
+  marker_lifetime: 1.0 #eband可视化标记的生命周期 ———————越大越切内？
+
+  # eband local planner parameters | 松紧带参数
+  eband_min_relative_overlap: 0.7 #连续气泡之间的连通性的最小距离Min distance that denotes connectivity between consecutive bubbles
+  eband_tiny_bubble_distance: 0.01 #微小气泡距离的气泡几何边界Bubble geometric bound regarding tiny bubble distance
+  eband_tiny_bubble_expansion: 0.01 #微小气泡膨胀的气泡几何边界默认0.01
+  eband_internal_force_gain: 1.0 # 连续气泡之间趋于拉伸弹性带的力的力增益Force gain of forces between consecutive bubbles that tend to stretch the elastic band
+  eband_external_force_gain: 2.0 #趋于使气泡远离障碍物的力的增力，默认4.0 ，大撞，小卡
+  num_iterations_eband_optimization: 4 #束带优化的迭代次数Number of iterations for eband optimization  ——————过大会一卡一卡，可以理解为计算次数？小了灵活
+  eband_equilibrium_approx_max_recursion_depth: 4 #达到内外力平衡的迭代次数Number of iterations for reaching the equilibrium between internal and external ——————过大会一卡一卡，可以理解为计算次数？
+  eband_equilibrium_relative_overshoot: 0.3 #最大相对平衡超调Maximum relative equlibrium overshoot
+#————————————————————————默认0.75 变小后拐弯分段现象变少，大了一卡一卡而且会超调。
+  eband_significant_force_lower_bound: 0.65 #计算中使用的最小力的大小，被认为是重要的Minimum magnitude of force that is considered significant  ————越大越灵活,虽然抖但不会撞墙～默认0.15
+  costmap_weight: 40.0 # Costmap权重因子，用于计算到障碍物的距离 default 10.0 Costmap weight factor used in the calculation of distance to obstacles  ——————越大越慢，但会少碰墙。
+
+  # trajectory controller parameters
+  max_vel_lin: 3.0 #Maximum linear velocity
+  max_vel_th: 3.6 #Maximum angular velocity
+  min_vel_lin: 0.2 #Minimum linear velocity
+  min_vel_th: 0.0
+  min_in_place_vel_th: 0.0    #-------很奇怪，大了撞墙
+  in_place_trans_vel: 0.0 #Minimum in place linear velocity #-------很奇怪，大了撞墙
+  k_prop: 2.0 # default 4.0 Proportional gain of the PID controller
+  k_damp: 1.6 # default 3.5 Damping gain of the PID controller
+  Ctrl_Rate: 15.0 # default 10.0
+  max_acceleration: 0.5 # defualt 0.5 Maximum allowable acceleration 过大明显卡顿
+  virtual_mass: 0.75  #默认0.75  虚拟质量？ 3kg？
+  max_translational_acceleration: 0.5 #0.5 #default 0.5 Maximum linear acceleration
+  max_rotational_acceleration: 1.5 #1.5 # default 1.5 Maximum angular acceleration
+  rotation_correction_threshold: 0.5 # default 0.5 旋转校正阈值
+  differential_drive: true
+  bubble_velocity_multiplier: 1.8 # 气泡半径的倍数  ，默认2.0 小变慢，无其他明显现象，大快，撞墙。
+  rotation_threshold_multiplier: 1.0 # 旋转阈值乘数 Multiplier of rotation threshold
+  disallow_hysteresis: false # 确定在超出公差范围时是否尝试接近目标 Determines whether to try getting closer to the goal, in case of going past the tolerance

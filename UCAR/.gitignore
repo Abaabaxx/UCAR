@@ -1,0 +1,53 @@
+# =========================
+# ROS / Catkin / Colcon
+# =========================
+build/
+devel/
+install/
+
+# 日志文件
+log/
+logs/
+*.log
+
+# 编译数据库
+compile_commands.json
+.catkin_tools/
+
+# =========================
+# IDE / 编辑器配置
+# =========================
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+# =========================
+# Python 缓存
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+
+# =========================
+# 临时文件 / 编译产物
+# =========================
+*.so
+*.a
+*.out
+
+# =========================
+# 其他用户自定义文件
+# =========================
+index.html*
+.catkin_workspace
+datasets/
+src/board_detect/goals_up/
+src/board_detect/goals_down/
+src/ucar_controller/log_info
+src/darknet_ros/.github/
+src/darknet_ros/darknet/
+src/darknet_ros/darknet_ros_msgs/
+src/darknet_ros/.gitmodules
+src/darknet_ros/jenkins-pipeline
+src/darknet_ros/LICENSE
